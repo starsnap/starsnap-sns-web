@@ -38,6 +38,7 @@ function toPrivateMeditation(
     return {
         id: meditation.id,
         verseId: selectedVerse.id,
+        endVerse: meditation.endVerse ?? meditation.verse,
         content: meditation.content,
         worshipAt: meditation.worshipAt ?? null,
         visibility: 'private',
@@ -76,6 +77,24 @@ export async function searchBibleVerses(
     }
 }
 
+export async function getBibleVerseRange(
+    verse: BibleVerseSummary,
+    endVerse: number,
+    signal?: AbortSignal,
+): Promise<BibleVerseSummary[]> {
+    const response = await AuthAxios.get<BibleVerseApiDto[]>('bible/verses/range', {
+        signal,
+        params: {
+            translationCode: DEFAULT_TRANSLATION_CODE,
+            bookCode: verse.bookCode,
+            chapter: verse.chapter,
+            verse: verse.verse,
+            endVerse,
+        },
+    })
+    return response.data.map(toVerseSummary)
+}
+
 export async function getPrivateBibleMeditation(
     verse: BibleVerseSummary,
     signal?: AbortSignal,
@@ -110,12 +129,14 @@ export async function savePrivateBibleMeditation(
                 content: request.content,
                 expectedVersion: currentMeditation.version,
                 worshipAt: request.worshipAt ?? null,
+                endVerse: request.endVerse,
             },
         )
         : await AuthAxios.post<BibleMeditationApiDto>('bible/meditations', {
             bookCode: verse.bookCode,
             chapter: verse.chapter,
             verse: verse.verse,
+            endVerse: request.endVerse,
             content: request.content,
             worshipAt: request.worshipAt ?? null,
         })

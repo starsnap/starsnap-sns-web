@@ -29,7 +29,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ surface = 'social' }) => {
     const loginSubtitle = isChatSurface
         ? 'SNS에서 이어진 대화를 메시지 전용 화면에서 만나보세요'
         : isBibleSurface
-            ? '성경 말씀을 찾고, 구절마다 묵상을 기록해보세요'
+            ? '성경 말씀을 찾고, 한 절 또는 여러 절로 QT를 기록해보세요'
             : '좋아하는 스타의 순간을 한곳에 모아보세요';
 
     const [loading, setLoading] = useState(false);

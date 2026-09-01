@@ -13,6 +13,7 @@ import {
 import {
     getBibleLicenseStatus,
     getPrivateBibleMeditation,
+    getBibleVerseRange,
     savePrivateBibleMeditation,
     searchBibleVerses,
 } from '../../services/bible/bibleService'
@@ -53,6 +54,12 @@ function getCurrentDatetimeInputValue(): string {
 function formatVerseReference(verse: BibleVerseSummary): string {
     if (verse.reference?.trim()) return verse.reference.trim()
     return `${verse.bookName} ${verse.chapter}:${verse.verse}`
+}
+
+function formatVerseRange(verses: BibleVerseSummary[], endVerse: number | null): string {
+    const first = verses[0]
+    if (!first || endVerse == null || first.verse === endVerse) return first ? formatVerseReference(first) : ''
+    return `${first.bookName} ${first.chapter}:${first.verse}-${endVerse}`
 }
 
 function LicensePanel({
@@ -123,17 +130,20 @@ const BiblePage = () => {
     const [results, setResults] = useState<BibleVerseSummary[]>([])
     const [searchLoading, setSearchLoading] = useState(false)
     const [searchLoadingMore, setSearchLoadingMore] = useState(false)
+    const [rangeLoading, setRangeLoading] = useState(false)
     const [searchPage, setSearchPage] = useState(0)
     const [searchHasNext, setSearchHasNext] = useState(false)
     const [searchError, setSearchError] = useState('')
     const [hasSearched, setHasSearched] = useState(false)
-    const [selectedVerse, setSelectedVerse] = useState<BibleVerseSummary | null>(null)
+    const [selectedVerses, setSelectedVerses] = useState<BibleVerseSummary[]>([])
+    const [selectedEndVerse, setSelectedEndVerse] = useState<number | null>(null)
     const [selectionNotice, setSelectionNotice] = useState('')
     const [meditation, setMeditation] = useState<PrivateBibleMeditation | null>(null)
     const [draft, setDraft] = useState('')
     const [savedContent, setSavedContent] = useState('')
     const [worshipAt, setWorshipAt] = useState('')
     const [savedWorshipAt, setSavedWorshipAt] = useState('')
+    const [savedEndVerse, setSavedEndVerse] = useState<number | null>(null)
     const [meditationLoading, setMeditationLoading] = useState(false)
     const [meditationSaving, setMeditationSaving] = useState(false)
     const [meditationError, setMeditationError] = useState('')
@@ -145,7 +155,11 @@ const BiblePage = () => {
         licenseStatus.phase === 'active' &&
         licenseStatus.searchAvailable &&
         licenseStatus.textDisplayAllowed
-    const isDirty = draft !== savedContent || worshipAt !== savedWorshipAt
+    const selectedVerse = selectedVerses[0] ?? null
+    const isDirty =
+        draft !== savedContent ||
+        worshipAt !== savedWorshipAt ||
+        selectedEndVerse !== savedEndVerse
 
     useEffect(() => {
         setHasUnsavedChanges(isDirty)
@@ -162,22 +176,22 @@ const BiblePage = () => {
             const active = status.phase === 'active' && status.searchAvailable && status.textDisplayAllowed
             if (!active) {
                 setResults([])
-                setSelectedVerse((current) => current ? {
-                    ...current,
+                setSelectedVerses((current) => current.map((verse) => ({
+                    ...verse,
                     text: undefined,
                     displayAllowed: false,
-                } : null)
+                })))
                 setHasSearched(false)
                 setSearchHasNext(false)
             }
         } catch {
             setLicenseStatus(SAFE_PENDING_LICENSE_STATUS)
             setResults([])
-            setSelectedVerse((current) => current ? {
-                ...current,
+            setSelectedVerses((current) => current.map((verse) => ({
+                ...verse,
                 text: undefined,
                 displayAllowed: false,
-            } : null)
+            })))
             setHasSearched(false)
             setSearchHasNext(false)
             setLicenseError('상태 확인 서버에 연결하지 못해 검색을 안전하게 잠갔습니다.')
@@ -199,6 +213,8 @@ const BiblePage = () => {
             setSavedContent('')
             setWorshipAt(initialWorshipTime)
             setSavedWorshipAt(initialWorshipTime)
+            setSelectedEndVerse(null)
+            setSavedEndVerse(null)
             return
         }
 
@@ -209,7 +225,7 @@ const BiblePage = () => {
         setSaveMessage('')
 
         void getPrivateBibleMeditation(selectedVerse, controller.signal)
-            .then((savedMeditation) => {
+            .then(async (savedMeditation) => {
                 if (controller.signal.aborted) return
                 const content = savedMeditation?.content ?? ''
                 const worshipTime = formatDatetimeInputValue(savedMeditation?.worshipAt)
@@ -218,6 +234,21 @@ const BiblePage = () => {
                 setSavedContent(content)
                 setWorshipAt(worshipTime)
                 setSavedWorshipAt(worshipTime)
+                const endVerse = savedMeditation?.endVerse ?? selectedVerse.verse
+                setSelectedEndVerse(endVerse)
+                setSavedEndVerse(endVerse)
+                if (endVerse > selectedVerse.verse) {
+                    try {
+                        const range = await getBibleVerseRange(selectedVerse, endVerse, controller.signal)
+                        if (!controller.signal.aborted) setSelectedVerses(range)
+                    } catch {
+                        if (!controller.signal.aborted) {
+                            setSelectionNotice('저장된 QT 구간의 본문을 모두 불러오지 못했습니다.')
+                        }
+                    }
+                } else {
+                    setSelectedVerses([selectedVerse])
+                }
             })
             .catch(() => {
                 if (controller.signal.aborted) return
@@ -227,6 +258,8 @@ const BiblePage = () => {
                 setSavedContent('')
                 setWorshipAt(initialWorshipTime)
                 setSavedWorshipAt(initialWorshipTime)
+                setSelectedEndVerse(selectedVerse.verse)
+                setSavedEndVerse(selectedVerse.verse)
                 setMeditationError('저장된 묵상을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.')
             })
             .finally(() => {
@@ -274,22 +307,49 @@ const BiblePage = () => {
         void performSearch({ queryValue: query, page: 0, append: false })
     }
 
-    const handleSelectVerse = (verse: BibleVerseSummary) => {
-        if (selectedVerse?.id !== verse.id && isDirty) {
+    const handleSelectVerse = async (verse: BibleVerseSummary) => {
+        const editorChanged = draft !== savedContent || worshipAt !== savedWorshipAt
+        const changesStart = Boolean(
+            !selectedVerse ||
+            selectedVerse.bookCode !== verse.bookCode ||
+            selectedVerse.chapter !== verse.chapter ||
+            verse.verse < selectedVerse.verse,
+        )
+        if (meditationLoading || rangeLoading) {
+            setSelectionNotice('QT 구간을 불러오는 중입니다. 잠시 후 다시 선택해주세요.')
+            return
+        }
+        if ((changesStart && isDirty) || (!changesStart && selectedVerse?.id !== verse.id && editorChanged)) {
             setSelectionNotice('저장하지 않은 묵상이 있습니다. 먼저 저장하거나 변경을 취소해주세요.')
             return
         }
 
         setSelectionNotice('')
         setMeditationConflict(false)
-        setSelectedVerse(verse)
+        if (
+            changesStart
+        ) {
+            setSelectedVerses([verse])
+            setSelectedEndVerse(verse.verse)
+            setSavedEndVerse(verse.verse)
+        } else if (selectedVerse) {
+            setRangeLoading(true)
+            try {
+                setSelectedVerses(await getBibleVerseRange(selectedVerse, verse.verse))
+                setSelectedEndVerse(verse.verse)
+            } catch {
+                setSelectionNotice('선택한 QT 구간을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.')
+            } finally {
+                setRangeLoading(false)
+            }
+        }
         requestAnimationFrame(() => {
             document.getElementById('bible-meditation-editor')?.scrollIntoView({ block: 'start' })
         })
     }
 
     const handleSaveMeditation = async () => {
-        if (!selectedVerse || meditationSaving || !isDirty) return
+        if (!selectedVerse || selectedEndVerse == null || meditationSaving || !isDirty) return
         if (!draft.trim()) {
             setMeditationError('묵상 내용을 한 글자 이상 입력해주세요.')
             return
@@ -309,6 +369,7 @@ const BiblePage = () => {
             const saved = await savePrivateBibleMeditation(selectedVerse, {
                 content: submittedContent,
                 worshipAt: submittedWorshipAt,
+                endVerse: selectedEndVerse,
             }, meditation || undefined)
             setMeditation(saved)
             setMeditationConflict(false)
@@ -317,6 +378,7 @@ const BiblePage = () => {
             const worshipTime = formatDatetimeInputValue(saved.worshipAt)
             setWorshipAt(worshipTime)
             setSavedWorshipAt(worshipTime)
+            setSavedEndVerse(saved.endVerse)
             setSaveMessage('말씀 노트를 비공개로 저장했습니다.')
         } catch (error) {
             const conflict = Boolean(
@@ -334,12 +396,45 @@ const BiblePage = () => {
         }
     }
 
+    const handleCancelChanges = async () => {
+        setDraft(savedContent)
+        setWorshipAt(savedWorshipAt)
+        setMeditationError('')
+        setSaveMessage('변경 사항을 취소했습니다.')
+        if (savedEndVerse == null || !selectedVerse) return
+
+        setSelectedEndVerse(savedEndVerse)
+        if (savedEndVerse === selectedVerse.verse) {
+            setSelectedVerses([selectedVerse])
+            return
+        }
+        setRangeLoading(true)
+        try {
+            setSelectedVerses(await getBibleVerseRange(selectedVerse, savedEndVerse))
+        } catch {
+            setSelectionNotice('저장된 QT 구간을 다시 불러오지 못했습니다.')
+        } finally {
+            setRangeLoading(false)
+        }
+    }
+
+    const handleResetSelection = () => {
+        if (isDirty) {
+            setSelectionNotice('저장하지 않은 묵상이 있습니다. 먼저 저장하거나 변경을 취소해주세요.')
+            return
+        }
+        setSelectedVerses([])
+        setSelectedEndVerse(null)
+        setSavedEndVerse(null)
+        setSelectionNotice('새 QT 시작 절을 선택하세요.')
+    }
+
     const liveMessage = useMemo(() => {
-        if (searchLoading || searchLoadingMore) return '성경 구절 검색 중'
+        if (searchLoading || searchLoadingMore || rangeLoading) return '성경 구절 검색 중'
         if (searchError) return searchError
         if (hasSearched) return results.length > 0 ? `${results.length}개의 구절을 찾았습니다.` : '검색 결과가 없습니다.'
         return canSearch ? '성경 본문 검색 준비 완료' : '라이선스 확인 대기 중'
-    }, [canSearch, hasSearched, results.length, searchError, searchLoading, searchLoadingMore])
+    }, [canSearch, hasSearched, rangeLoading, results.length, searchError, searchLoading, searchLoadingMore])
 
     return (
         <div className="bible-page">
@@ -350,7 +445,7 @@ const BiblePage = () => {
             <section className="bible-intro" aria-labelledby="bible-page-title">
                 <div>
                     <p className="bible-eyebrow">READ · NOTICE · WRITE</p>
-                    <h1 id="bible-page-title">한 구절을 찾고, 조용히 기록하세요</h1>
+                    <h1 id="bible-page-title">말씀 구간을 찾고, 조용히 기록하세요</h1>
                     <p>
                         허가된 성경 본문만 검색하며, 작성한 묵상은 내 계정에 비공개로 저장됩니다.
                     </p>
@@ -371,7 +466,7 @@ const BiblePage = () => {
                         <span className="bible-section-heading__number" aria-hidden="true">01</span>
                         <div>
                             <p className="bible-eyebrow">성경 검색</p>
-                            <h2 id="bible-search-title">구절을 찾아 선택하세요</h2>
+                            <h2 id="bible-search-title">QT할 구절을 이어서 선택하세요</h2>
                         </div>
                     </div>
 
@@ -406,7 +501,7 @@ const BiblePage = () => {
                         </p>
                     </form>
 
-                    <div className="bible-results" aria-busy={searchLoading || searchLoadingMore}>
+                    <div className="bible-results" aria-busy={searchLoading || searchLoadingMore || rangeLoading}>
                         {searchLoading ? <SearchLoadingState /> : null}
 
                         {!searchLoading && searchError ? (
@@ -435,7 +530,7 @@ const BiblePage = () => {
                                 <strong>{canSearch ? '검색어를 입력해 시작하세요' : '본문 이용 허가를 기다리고 있습니다'}</strong>
                                 <p>
                                     {canSearch
-                                        ? '결과에서 한 구절을 선택하면 오른쪽 묵상 노트가 열립니다.'
+                                        ? '시작 절을 누른 뒤 같은 장의 마지막 절을 누르면 여러 절을 한 번에 선택할 수 있습니다.'
                                         : '허가 전에는 어떤 성경 본문도 앱에 하드코딩하거나 표시하지 않습니다.'}
                                 </p>
                             </div>
@@ -453,12 +548,12 @@ const BiblePage = () => {
                             <>
                                 <div className="bible-results__summary">
                                     <strong>{results.length}개 구절</strong>
-                                    <span>하나를 선택해 비공개 묵상을 작성하세요</span>
+                                    <span>시작 절과 마지막 절을 선택해 비공개 QT를 작성하세요</span>
                                 </div>
                                 {selectionNotice ? <p className="bible-inline-error" role="alert">{selectionNotice}</p> : null}
                                 <ol className="bible-result-list">
                                     {results.map((verse) => {
-                                        const selected = selectedVerse?.id === verse.id
+                                        const selected = selectedVerses.some((item) => item.id === verse.id)
                                         const canDisplayVerse =
                                             licenseStatus.textDisplayAllowed &&
                                             verse.displayAllowed &&
@@ -469,8 +564,9 @@ const BiblePage = () => {
                                                 <button
                                                     className={`bible-result ${selected ? 'bible-result--selected' : ''}`}
                                                     type="button"
-                                                    onClick={() => handleSelectVerse(verse)}
+                                                    onClick={() => void handleSelectVerse(verse)}
                                                     aria-pressed={selected}
+                                                    disabled={meditationLoading || rangeLoading}
                                                 >
                                                     <span className="bible-result__reference">
                                                         {formatVerseReference(verse)}
@@ -484,7 +580,14 @@ const BiblePage = () => {
                                                             : '본문 표시 권한이 확인되지 않아 참조 정보만 제공합니다.'}
                                                     </span>
                                                     <span className="bible-result__action">
-                                                        묵상하기
+                                                        {selected
+                                                            ? '선택됨'
+                                                            : selectedVerse &&
+                                                                selectedVerse.bookCode === verse.bookCode &&
+                                                                selectedVerse.chapter === verse.chapter &&
+                                                                verse.verse >= selectedVerse.verse
+                                                                ? '여기까지 선택'
+                                                                : 'QT 시작'}
                                                         <FiChevronRight size={18} aria-hidden="true" />
                                                     </span>
                                                 </button>
@@ -533,18 +636,33 @@ const BiblePage = () => {
                         <div className="bible-state bible-state--editor">
                             <FiEdit3 size={28} aria-hidden="true" />
                             <strong>선택한 구절이 없습니다</strong>
-                            <p>검색 결과에서 구절을 선택하면 이곳에 개인 묵상 노트가 열립니다.</p>
+                            <p>검색 결과에서 시작 절을 선택하면 이곳에 개인 QT 노트가 열립니다.</p>
                         </div>
                     ) : (
                         <div className="bible-editor">
                             <div className="bible-selected-verse">
                                 <div>
-                                    <p className="bible-eyebrow">선택한 구절</p>
-                                    <h3>{formatVerseReference(selectedVerse)}</h3>
+                                    <p className="bible-eyebrow">선택한 QT 구간</p>
+                                    <h3>{formatVerseRange(selectedVerses, selectedEndVerse)}</h3>
                                 </div>
                                 <span>{selectedVerse.translation || '허가된 번역본'}</span>
+                                <button
+                                    className="bible-button bible-button--quiet bible-selected-verse__reset"
+                                    type="button"
+                                    onClick={handleResetSelection}
+                                    disabled={meditationLoading || rangeLoading}
+                                >
+                                    QT 구간 다시 선택
+                                </button>
                                 {licenseStatus.textDisplayAllowed && selectedVerse.displayAllowed && selectedVerse.text?.trim() ? (
-                                    <blockquote>{selectedVerse.text}</blockquote>
+                                    <div className="bible-selected-verse__range">
+                                        {selectedVerses.map((verse) => (
+                                            <blockquote key={verse.id}>
+                                                {selectedVerses.length > 1 ? <strong>{verse.verse}절</strong> : null}
+                                                {verse.text}
+                                            </blockquote>
+                                        ))}
+                                    </div>
                                 ) : (
                                     <p className="bible-selected-verse__protected">
                                         본문 표시 권한이 확인되지 않아 구절 내용은 숨겨져 있습니다.
@@ -629,13 +747,8 @@ const BiblePage = () => {
                                         <button
                                             className="bible-button bible-button--quiet"
                                             type="button"
-                                            onClick={() => {
-                                                setDraft(savedContent)
-                                                setWorshipAt(savedWorshipAt)
-                                                setMeditationError('')
-                                                setSaveMessage('변경 사항을 취소했습니다.')
-                                            }}
-                                            disabled={!isDirty || meditationSaving}
+                                            onClick={() => void handleCancelChanges()}
+                                            disabled={!isDirty || meditationSaving || rangeLoading}
                                         >
                                             변경 취소
                                         </button>
@@ -643,7 +756,7 @@ const BiblePage = () => {
                                             className="bible-button bible-button--primary"
                                             type="button"
                                             onClick={() => void handleSaveMeditation()}
-                                            disabled={!isDirty || meditationSaving || !draft.trim() || !worshipAt.trim()}
+                                            disabled={!isDirty || meditationSaving || rangeLoading || !draft.trim() || !worshipAt.trim()}
                                         >
                                             {meditationSaving ? <FiRefreshCw className="bible-spin" size={18} aria-hidden="true" /> : <FiLock size={17} aria-hidden="true" />}
                                             {meditationSaving ? '저장 중…' : '비공개로 저장'}

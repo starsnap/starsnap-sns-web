@@ -37,6 +37,7 @@ export type BibleSearchResponse = {
 export type PrivateBibleMeditation = {
     id: string
     verseId: string
+    endVerse: number
     content: string
     worshipAt?: string | null
     visibility: 'private'
@@ -48,6 +49,7 @@ export type PrivateBibleMeditation = {
 export type SavePrivateBibleMeditationRequest = {
     content: string
     worshipAt?: string | null
+    endVerse: number
 }
 
 export type BibleVerseApiDto = {
@@ -66,6 +68,7 @@ export type BibleMeditationApiDto = {
     bookCode: string
     chapter: number
     verse: number
+    endVerse?: number
     content: string
     worshipAt?: string | null
     version: number
