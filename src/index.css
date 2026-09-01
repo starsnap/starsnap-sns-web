@@ -181,6 +181,15 @@ textarea {
   border-color: var(--ss-border-strong);
 }
 
+:where(
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']),
+  select,
+  textarea
+):focus-visible:not(:disabled) {
+  outline: 1px solid color-mix(in srgb, var(--ss-brand) 55%, transparent);
+  outline-offset: 1px;
+}
+
 .conversation-search-input {
   border: 1px solid var(--ss-border);
 }
