@@ -32,6 +32,24 @@ const SAFE_PENDING_LICENSE_STATUS: BibleLicenseStatus = {
     notice: '성경 본문 이용 허가 절차를 진행 중입니다.',
 }
 
+function formatDatetimeInputValue(value: string | null | undefined): string {
+    if (!value?.trim()) return getCurrentDatetimeInputValue()
+    const base = value.trim().replace(' ', 'T')
+    return base.includes('.')
+        ? base.split('.')[0].slice(0, 16)
+        : base.slice(0, 16)
+}
+
+function getCurrentDatetimeInputValue(): string {
+    const now = new Date()
+    const year = now.getFullYear()
+    const month = String(now.getMonth() + 1).padStart(2, '0')
+    const day = String(now.getDate()).padStart(2, '0')
+    const hour = String(now.getHours()).padStart(2, '0')
+    const minute = String(now.getMinutes()).padStart(2, '0')
+    return `${year}-${month}-${day}T${hour}:${minute}`
+}
+
 function formatVerseReference(verse: BibleVerseSummary): string {
     if (verse.reference?.trim()) return verse.reference.trim()
     return `${verse.bookName} ${verse.chapter}:${verse.verse}`
@@ -114,6 +132,8 @@ const BiblePage = () => {
     const [meditation, setMeditation] = useState<PrivateBibleMeditation | null>(null)
     const [draft, setDraft] = useState('')
     const [savedContent, setSavedContent] = useState('')
+    const [worshipAt, setWorshipAt] = useState('')
+    const [savedWorshipAt, setSavedWorshipAt] = useState('')
     const [meditationLoading, setMeditationLoading] = useState(false)
     const [meditationSaving, setMeditationSaving] = useState(false)
     const [meditationError, setMeditationError] = useState('')
@@ -125,7 +145,7 @@ const BiblePage = () => {
         licenseStatus.phase === 'active' &&
         licenseStatus.searchAvailable &&
         licenseStatus.textDisplayAllowed
-    const isDirty = draft !== savedContent
+    const isDirty = draft !== savedContent || worshipAt !== savedWorshipAt
 
     useEffect(() => {
         setHasUnsavedChanges(isDirty)
@@ -173,9 +193,12 @@ const BiblePage = () => {
     const selectedVerseId = selectedVerse?.id
     useEffect(() => {
         if (!selectedVerse || !selectedVerseId) {
+            const initialWorshipTime = getCurrentDatetimeInputValue()
             setMeditation(null)
             setDraft('')
             setSavedContent('')
+            setWorshipAt(initialWorshipTime)
+            setSavedWorshipAt(initialWorshipTime)
             return
         }
 
@@ -189,15 +212,21 @@ const BiblePage = () => {
             .then((savedMeditation) => {
                 if (controller.signal.aborted) return
                 const content = savedMeditation?.content ?? ''
+                const worshipTime = formatDatetimeInputValue(savedMeditation?.worshipAt)
                 setMeditation(savedMeditation)
                 setDraft(content)
                 setSavedContent(content)
+                setWorshipAt(worshipTime)
+                setSavedWorshipAt(worshipTime)
             })
             .catch(() => {
                 if (controller.signal.aborted) return
+                const initialWorshipTime = getCurrentDatetimeInputValue()
                 setMeditation(null)
                 setDraft('')
                 setSavedContent('')
+                setWorshipAt(initialWorshipTime)
+                setSavedWorshipAt(initialWorshipTime)
                 setMeditationError('저장된 묵상을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.')
             })
             .finally(() => {
@@ -265,21 +294,30 @@ const BiblePage = () => {
             setMeditationError('묵상 내용을 한 글자 이상 입력해주세요.')
             return
         }
+        if (!worshipAt.trim()) {
+            setMeditationError('예배 시간을 입력해주세요.')
+            return
+        }
 
         setMeditationSaving(true)
         setMeditationError('')
         setSaveMessage('')
         const submittedContent = draft
+        const submittedWorshipAt = worshipAt.trim()
 
         try {
             const saved = await savePrivateBibleMeditation(selectedVerse, {
                 content: submittedContent,
+                worshipAt: submittedWorshipAt,
             }, meditation || undefined)
             setMeditation(saved)
             setMeditationConflict(false)
             setDraft((current) => current === submittedContent ? saved.content : current)
             setSavedContent(saved.content)
-            setSaveMessage('비공개 묵상으로 저장했습니다.')
+            const worshipTime = formatDatetimeInputValue(saved.worshipAt)
+            setWorshipAt(worshipTime)
+            setSavedWorshipAt(worshipTime)
+            setSaveMessage('말씀 노트를 비공개로 저장했습니다.')
         } catch (error) {
             const conflict = Boolean(
                 error &&
@@ -486,8 +524,8 @@ const BiblePage = () => {
                     <div className="bible-section-heading">
                         <span className="bible-section-heading__number" aria-hidden="true">02</span>
                         <div>
-                            <p className="bible-eyebrow">비공개 묵상</p>
-                            <h2 id="bible-editor-title">내 마음에 남은 내용을 적어보세요</h2>
+                            <p className="bible-eyebrow">말씀 노트 · 비공개</p>
+                            <h2 id="bible-editor-title">예배 시간과 마음에 남은 내용을 기록하세요</h2>
                         </div>
                     </div>
 
@@ -523,11 +561,27 @@ const BiblePage = () => {
                                 <>
                                     <div className="bible-privacy-note" id="bible-privacy-note">
                                         <FiLock size={17} aria-hidden="true" />
-                                        <span>이 묵상은 내 계정에서만 볼 수 있는 비공개 기록입니다.</span>
+                                        <span>이 말씀 노트는 내 계정에서만 볼 수 있는 비공개 기록입니다.</span>
+                                    </div>
+
+                                    <div className="bible-editor__field">
+                                        <label className="bible-editor__label" htmlFor="bible-worship-at">
+                                            예배 시간
+                                        </label>
+                                        <input
+                                            id="bible-worship-at"
+                                            type="datetime-local"
+                                            value={worshipAt}
+                                            onChange={(event) => {
+                                                setWorshipAt(event.target.value)
+                                                setMeditationError('')
+                                                setSaveMessage('')
+                                            }}
+                                        />
                                     </div>
 
                                     <label className="bible-editor__label" htmlFor="bible-meditation-textarea">
-                                        묵상 내용
+                                        말씀 노트 내용
                                     </label>
                                     <textarea
                                         id="bible-meditation-textarea"
@@ -577,6 +631,7 @@ const BiblePage = () => {
                                             type="button"
                                             onClick={() => {
                                                 setDraft(savedContent)
+                                                setWorshipAt(savedWorshipAt)
                                                 setMeditationError('')
                                                 setSaveMessage('변경 사항을 취소했습니다.')
                                             }}
@@ -588,7 +643,7 @@ const BiblePage = () => {
                                             className="bible-button bible-button--primary"
                                             type="button"
                                             onClick={() => void handleSaveMeditation()}
-                                            disabled={!isDirty || meditationSaving || !draft.trim()}
+                                            disabled={!isDirty || meditationSaving || !draft.trim() || !worshipAt.trim()}
                                         >
                                             {meditationSaving ? <FiRefreshCw className="bible-spin" size={18} aria-hidden="true" /> : <FiLock size={17} aria-hidden="true" />}
                                             {meditationSaving ? '저장 중…' : '비공개로 저장'}

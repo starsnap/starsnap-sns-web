@@ -39,6 +39,7 @@ function toPrivateMeditation(
         id: meditation.id,
         verseId: selectedVerse.id,
         content: meditation.content,
+        worshipAt: meditation.worshipAt ?? null,
         visibility: 'private',
         version: meditation.version,
         createdAt: meditation.createdAt,
@@ -105,13 +106,18 @@ export async function savePrivateBibleMeditation(
     const response = currentMeditation
         ? await AuthAxios.patch<BibleMeditationApiDto>(
             `bible/meditations/${encodeURIComponent(currentMeditation.id)}`,
-            { content: request.content, expectedVersion: currentMeditation.version },
+            {
+                content: request.content,
+                expectedVersion: currentMeditation.version,
+                worshipAt: request.worshipAt ?? null,
+            },
         )
         : await AuthAxios.post<BibleMeditationApiDto>('bible/meditations', {
             bookCode: verse.bookCode,
             chapter: verse.chapter,
             verse: verse.verse,
             content: request.content,
+            worshipAt: request.worshipAt ?? null,
         })
     return toPrivateMeditation(response.data, verse)
 }

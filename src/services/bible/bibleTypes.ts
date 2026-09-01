@@ -38,6 +38,7 @@ export type PrivateBibleMeditation = {
     id: string
     verseId: string
     content: string
+    worshipAt?: string | null
     visibility: 'private'
     version: number
     createdAt: string
@@ -46,6 +47,7 @@ export type PrivateBibleMeditation = {
 
 export type SavePrivateBibleMeditationRequest = {
     content: string
+    worshipAt?: string | null
 }
 
 export type BibleVerseApiDto = {
@@ -65,6 +67,7 @@ export type BibleMeditationApiDto = {
     chapter: number
     verse: number
     content: string
+    worshipAt?: string | null
     version: number
     createdAt: string
     modifiedAt: string

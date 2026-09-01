@@ -346,6 +346,26 @@
   cursor: not-allowed;
 }
 
+.bible-editor__field {
+  margin-top: 0.75rem;
+}
+
+.bible-editor__field + .bible-editor__label {
+  margin-top: 1rem;
+}
+
+.bible-editor input {
+  width: 100%;
+  min-height: 48px;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--ss-border-strong);
+  border-radius: var(--ss-radius-md);
+  color: var(--ss-text);
+  background: var(--ss-surface);
+  font: inherit;
+  font-size: var(--ss-font-size-base);
+}
+
 .bible-search-form > p {
   margin: 0.55rem 0 0;
   color: var(--ss-text-subtle);
