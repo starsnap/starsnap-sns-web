@@ -19,6 +19,7 @@ import SettingPage from '../pages/main/SettingPage';
 import ChatLayout from '../pages/chat/ChatLayout';
 import BibleLayout from '../pages/bible/BibleLayout';
 import BiblePage from '../pages/bible/BiblePage';
+import BibleSignupPage from '../pages/bible/BibleSignupPage';
 import { getAppSurface } from '../lib/appSurface';
 import token from '../lib/token/token';
 
@@ -88,8 +89,8 @@ const BibleRoutes = () => {
                 <Route index element={<BiblePage/>} />
             </Route>
             <Route path="/login" element={<LoginPage surface="bible"/>} />
-            <Route path="/signup" element={<SignupPage/>} />
-            <Route path="/oauth/signup" element={<SignupPage/>} />
+            <Route path="/signup" element={<BibleSignupPage/>} />
+            <Route path="/oauth/signup" element={<Navigate to="/signup" replace/>} />
             <Route path="*" element={<Navigate to="/" replace/>} />
         </Routes>
     )
