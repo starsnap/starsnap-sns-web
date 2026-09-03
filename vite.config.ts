@@ -9,6 +9,10 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react(), tailwindcss()],
+    resolve: {
+      // Vite 8 otherwise selects lottie-react's UMD browser entry as an object.
+      alias: [{ find: /^lottie-react$/, replacement: 'lottie-react/build/index.es.js' }],
+    },
     server: {
       host: '0.0.0.0',
       port: 3000,
