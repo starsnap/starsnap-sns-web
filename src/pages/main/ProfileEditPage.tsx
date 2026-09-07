@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { CheckIcon, ChevronLeftIcon, ImageIcon } from '../../components/icons'
+import { ProfileEditSkeleton } from '../../components/ui/EntitySkeletons'
 import {
     changeProfileImage,
     changeUsername,
@@ -144,7 +145,7 @@ const ProfileEditPage: React.FC = () => {
     }
 
     if (profileQuery.isLoading) {
-        return <div className="px-4 py-5 text-sm text-sub sm:px-6 sm:py-7 lg:px-8">프로필 정보를 불러오는 중입니다.</div>
+        return <ProfileEditSkeleton />
     }
 
     if (!profile) {

@@ -16,6 +16,25 @@ const toSnapCard = (item: SnapFeedItem, index: number): Snap => ({
     liked: !!item.snapData.likeState,
 })
 
+const tagSkeletonWidths = ['w-16', 'w-20', 'w-14', 'w-24', 'w-16'] as const
+
+const TrendingTagSkeleton: React.FC = () => (
+    <div
+        className="flex flex-wrap gap-2"
+        role="status"
+        aria-busy="true"
+        aria-label="인기 태그 불러오는 중"
+    >
+        {tagSkeletonWidths.map((width, index) => (
+            <span
+                key={`${width}-${index}`}
+                className={`h-11 ${width} rounded-full bg-placeholder animate-pulse`}
+                aria-hidden="true"
+            />
+        ))}
+    </div>
+)
+
 const HomePage: React.FC = () => {
     const navigate = useNavigate()
     const [active, setActive] = useState('전체')
@@ -75,7 +94,11 @@ const HomePage: React.FC = () => {
             <p className="mt-1 text-sm text-sub">팔로우한 스타들의 최신 스냅을 둘러보세요</p>
 
             <div className="mt-6">
-                <CategoryChips items={chipItems} active={active} onChange={setActive} />
+                {trendingTagsQuery.isLoading ? (
+                    <TrendingTagSkeleton />
+                ) : (
+                    <CategoryChips items={chipItems} active={active} onChange={setActive} />
+                )}
             </div>
 
             <div className="mt-6">

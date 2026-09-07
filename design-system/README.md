@@ -12,14 +12,14 @@ The generated files are committed inside each independently deployed project so 
 
 ## Commands
 
-Run these commands from `starsnap-main/starsnap-web`:
+Run these commands from `starsnap-main/starsnap-sns-web`:
 
 ```bash
 npm run design:sync
 npm run design:check
 ```
 
-- Change values only in `starsnap-main/starsnap-web/design-system/tokens.json`.
+- Change values only in `starsnap-main/starsnap-sns-web/design-system/tokens.json`.
 - Run `design:sync` to update the three web CSS files, the web TypeScript bridge, and Android Compose tokens.
 - Run `design:check` in CI or before a commit to detect drift.
 - Existing `CustomColor` and `CustomTextStyle` Android APIs remain compatibility aliases; new UI should use `StarSnapColor` and `StarSnapTypography`.

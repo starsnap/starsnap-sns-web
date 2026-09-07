@@ -50,7 +50,7 @@ function findForbiddenClassPair(content, background, foreground) {
 
 const cssFiles = [
   path.join(workspaceRoot, 'starsnap-admin/starsnap-admin-web/src/styles.css'),
-  path.join(workspaceRoot, 'starsnap-hub/starsnap-hub-web/src/styles.css'),
+  path.join(workspaceRoot, 'starsnap-log/starsnap-log-web/src/styles.css'),
 ];
 
 for (const file of cssFiles) {
@@ -63,7 +63,7 @@ for (const file of cssFiles) {
   }
 }
 
-const mainWebRoot = path.join(workspaceRoot, 'starsnap-main/starsnap-web/src');
+const mainWebRoot = path.join(workspaceRoot, 'starsnap-main/starsnap-sns-web/src');
 for (const file of walk(mainWebRoot, ['.ts', '.tsx', '.css'])) {
   if (file.endsWith(path.join('styles', 'tokens.css'))) continue;
   const content = fs.readFileSync(file, 'utf8');

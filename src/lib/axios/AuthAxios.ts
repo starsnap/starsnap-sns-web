@@ -1,6 +1,7 @@
 import axios, { AxiosHeaders } from 'axios';
 import type { AxiosRequestConfig, AxiosError } from 'axios';
 import token from '../token/token';
+import { getAppSurface } from '../appSurface';
 
 function resolveApiHost() {
     const raw = import.meta.env.VITE_PUBLIC_LOCAL_API_HOST || '';
@@ -65,6 +66,20 @@ AuthAxios.interceptors.response.use(
             isAccessTokenExpiredError(error);
 
         if (!shouldRetryWithRefresh) {
+            if ((error.response.status === 401 || error.response.status === 403) && getAppSurface() === 'bible') {
+                token.clear();
+                if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+                    window.location.replace('/login');
+                }
+            }
+            return Promise.reject(error);
+        }
+
+        if (getAppSurface() === 'bible') {
+            token.clear();
+            if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+                window.location.replace('/login');
+            }
             return Promise.reject(error);
         }
 

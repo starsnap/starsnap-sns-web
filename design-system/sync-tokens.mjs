@@ -6,8 +6,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const workspaceRoot = path.resolve(here, '../../..');
 const tokens = JSON.parse(fs.readFileSync(path.join(here, 'tokens.json'), 'utf8'));
 
-const generatedHeader = '/* AUTO-GENERATED from /starsnap-main/starsnap-web/design-system/tokens.json. Do not edit directly. */';
-const generatedXmlHeader = '<!-- AUTO-GENERATED from /starsnap-main/starsnap-web/design-system/tokens.json. Do not edit directly. -->';
+const generatedHeader = '/* AUTO-GENERATED from /starsnap-main/starsnap-sns-web/design-system/tokens.json. Do not edit directly. */';
+const generatedXmlHeader = '<!-- AUTO-GENERATED from /starsnap-main/starsnap-sns-web/design-system/tokens.json. Do not edit directly. -->';
 const colorPrimitives = tokens.color.primitive;
 const semanticColors = tokens.color.semantic;
 const darkSemanticColors = tokens.color.theme.dark;
@@ -133,7 +133,7 @@ function generateTypeScript() {
     .map((name) => `    ${name}: 'var(--ss-font-size-${kebab(name)})',`)
     .join('\n');
 
-  return `// AUTO-GENERATED from /starsnap-main/starsnap-web/design-system/tokens.json. Do not edit directly.\n` +
+  return `// AUTO-GENERATED from /starsnap-main/starsnap-sns-web/design-system/tokens.json. Do not edit directly.\n` +
 `export const designTokens = {\n` +
 `  color: {\n${colorEntries}\n  },\n` +
 `  typography: {\n` +
@@ -161,8 +161,8 @@ function generateAndroidColors() {
     .map(([shade, value]) => `    val yellow${shade} = Color(${composeColor(value)})`)
     .join('\n');
 
-  return `// AUTO-GENERATED from /starsnap-main/starsnap-web/design-system/tokens.json. Do not edit directly.\n` +
-`package com.photo.starsnap.designsystem\n\n` +
+  return `// AUTO-GENERATED from /starsnap-main/starsnap-sns-web/design-system/tokens.json. Do not edit directly.\n` +
+`package com.sns.starsnap.designsystem\n\n` +
 `import androidx.compose.runtime.Composable\n` +
 `import androidx.compose.runtime.Immutable\n` +
 `import androidx.compose.runtime.ReadOnlyComposable\n` +
@@ -190,8 +190,8 @@ function generateAndroidTypography() {
       `    )`)
     .join('\n\n');
 
-  return `// AUTO-GENERATED from /starsnap-main/starsnap-web/design-system/tokens.json. Do not edit directly.\n` +
-`package com.photo.starsnap.designsystem.text\n\n` +
+  return `// AUTO-GENERATED from /starsnap-main/starsnap-sns-web/design-system/tokens.json. Do not edit directly.\n` +
+`package com.sns.starsnap.designsystem.text\n\n` +
 `import androidx.compose.ui.graphics.Color\n` +
 `import androidx.compose.ui.text.TextStyle\n` +
 `import androidx.compose.ui.text.font.FontWeight\n` +
@@ -210,12 +210,12 @@ function generateAndroidThemeColors(colors) {
 
 const css = generateCss();
 const targets = new Map([
-  ['starsnap-main/starsnap-web/src/styles/tokens.css', css],
+  ['starsnap-main/starsnap-sns-web/src/styles/tokens.css', css],
   ['starsnap-admin/starsnap-admin-web/src/design-tokens.css', css],
-  ['starsnap-hub/starsnap-hub-web/src/design-tokens.css', css],
-  ['starsnap-main/starsnap-web/src/styles/designTokens.ts', generateTypeScript()],
-  ['starsnap-main/starsnap-android/core/designsystem/src/main/java/com/photo/starsnap/designsystem/StarSnapColor.kt', generateAndroidColors()],
-  ['starsnap-main/starsnap-android/core/designsystem/src/main/java/com/photo/starsnap/designsystem/text/StarSnapTypography.kt', generateAndroidTypography()],
+  ['starsnap-log/starsnap-log-web/src/design-tokens.css', css],
+  ['starsnap-main/starsnap-sns-web/src/styles/designTokens.ts', generateTypeScript()],
+  ['starsnap-main/starsnap-android/core/designsystem/src/main/java/com/sns/starsnap/designsystem/StarSnapColor.kt', generateAndroidColors()],
+  ['starsnap-main/starsnap-android/core/designsystem/src/main/java/com/sns/starsnap/designsystem/text/StarSnapTypography.kt', generateAndroidTypography()],
   ['starsnap-main/starsnap-android/core/designsystem/src/main/res/values/colors.xml', generateAndroidThemeColors(semanticColors)],
   ['starsnap-main/starsnap-android/core/designsystem/src/main/res/values-night/colors.xml', generateAndroidThemeColors(darkSemanticColors)],
 ]);

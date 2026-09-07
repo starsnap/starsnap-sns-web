@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronRightIcon } from '../../components/icons'
 import Toggle from '../../components/ui/Toggle'
+import { SettingsRowsSkeleton, SettingsTableSkeleton } from '../../components/ui/EntitySkeletons'
 import { useTheme } from '../../components/providers/ThemeProvider'
 import CustomAxios from '../../lib/axios/CustomAxios'
 import { queryClient } from '../../lib/query/queryClient'
@@ -31,8 +32,9 @@ const Row: React.FC<{
     value?: string
     danger?: boolean
     chevron?: boolean
+    loadingValue?: boolean
     onClick?: () => void
-}> = ({ label, value, danger, chevron = true, onClick }) => (
+}> = ({ label, value, danger, chevron = true, loadingValue = false, onClick }) => (
     <button
         onClick={onClick}
         className="w-full h-14 px-5 flex items-center justify-between hover:bg-surface transition-colors"
@@ -41,8 +43,17 @@ const Row: React.FC<{
             {label}
         </span>
         <span className="flex items-center gap-2 text-sm text-muted">
-            {value}
-            {chevron && <ChevronRightIcon size={18} className="text-muted" />}
+            {loadingValue ? (
+                <span
+                    className="h-4 w-20 animate-pulse rounded bg-placeholder"
+                    role="status"
+                    aria-label={`${label} 값을 불러오는 중`}
+                    aria-busy="true"
+                />
+            ) : (
+                value
+            )}
+            {chevron && !loadingValue && <ChevronRightIcon size={18} className="text-muted" />}
         </span>
     </button>
 )
@@ -234,8 +245,16 @@ const SettingPage: React.FC = () => {
                 return (
                     <>
                         <Section title="계정">
-                            <Row label="프로필 정보" value={profile?.username ?? '사용자'} />
-                            <Row label="이메일 변경" value={profile?.email ?? '-'} />
+                            <Row
+                                label="프로필 정보"
+                                value={profile?.username ?? '사용자'}
+                                loadingValue={profileQuery.isLoading}
+                            />
+                            <Row
+                                label="이메일 변경"
+                                value={profile?.email ?? '-'}
+                                loadingValue={profileQuery.isLoading}
+                            />
                             <Row label="비밀번호 변경" />
                         </Section>
 
@@ -292,12 +311,21 @@ const SettingPage: React.FC = () => {
                         <Section title="공개 범위">
                             <div className="h-14 px-5 flex items-center justify-between">
                                 <span className="text-body-sm text-ink">비공개 계정</span>
-                                <Toggle
-                                    ariaLabel="비공개 계정"
-                                    checked={profile?.isPrivate ?? false}
-                                    onChange={handleTogglePrivateAccount}
-                                    disabled={isPrivacySubmitting || !profile}
-                                />
+                                {profileQuery.isLoading ? (
+                                    <span
+                                        className="h-6 w-11 animate-pulse rounded-full bg-placeholder"
+                                        role="status"
+                                        aria-label="계정 공개 범위를 불러오는 중"
+                                        aria-busy="true"
+                                    />
+                                ) : (
+                                    <Toggle
+                                        ariaLabel="비공개 계정"
+                                        checked={profile?.isPrivate ?? false}
+                                        onChange={handleTogglePrivateAccount}
+                                        disabled={isPrivacySubmitting || !profile}
+                                    />
+                                )}
                             </div>
                             <div className="h-14 px-5 flex items-center justify-between">
                                 <span className="text-body-sm text-ink">검색 노출 허용</span>
@@ -313,6 +341,7 @@ const SettingPage: React.FC = () => {
                             <Row
                                 label="차단 사용자 관리"
                                 value={`${(blockedUsersQuery.data ?? []).length}명`}
+                                loadingValue={blockedUsersQuery.isLoading}
                                 onClick={handleOpenBlockedUsersModal}
                             />
                             <Row label="활동 상태 표시" value="친구에게만" />
@@ -351,7 +380,7 @@ const SettingPage: React.FC = () => {
                     <>
                         <Section title="최근 신고">
                             {reportHistoryQuery.isLoading ? (
-                                <div className="px-5 py-4 text-sm text-sub">신고 내역을 불러오는 중입니다.</div>
+                                <SettingsRowsSkeleton />
                             ) : reportHistoryQuery.isError ? (
                                 <div className="px-5 py-4 text-sm text-danger">신고 내역을 불러오지 못했습니다.</div>
                             ) : (reportHistoryQuery.data ?? []).length === 0 ? (
@@ -373,6 +402,7 @@ const SettingPage: React.FC = () => {
                                 label="총 신고 건수"
                                 value={`${(reportHistoryQuery.data ?? []).length}건`}
                                 chevron={false}
+                                loadingValue={reportHistoryQuery.isLoading}
                             />
                             <Row label="신고 가이드" />
                         </Section>
@@ -390,7 +420,7 @@ const SettingPage: React.FC = () => {
 
                         <Section title="내 문의 내역">
                             {inquiryQuery.isLoading ? (
-                                <div className="px-5 py-4 text-sm text-sub">문의 내역을 불러오는 중입니다.</div>
+                                <SettingsTableSkeleton />
                             ) : inquiryQuery.isError ? (
                                 <div className="px-5 py-4 text-sm text-danger">문의 내역을 불러오지 못했습니다.</div>
                             ) : (inquiryQuery.data ?? []).length === 0 ? (
@@ -629,7 +659,7 @@ const SettingPage: React.FC = () => {
 
                         <div className="max-h-[420px] overflow-y-auto rounded-xl border border-line divide-y divide-line">
                             {blockedUsersQuery.isLoading ? (
-                                <div className="px-4 py-3 text-sm text-sub">차단 사용자 목록을 불러오는 중입니다.</div>
+                                <SettingsRowsSkeleton />
                             ) : blockedUsersQuery.isError ? (
                                 <div className="px-4 py-3 text-sm text-danger">차단 사용자 목록을 불러오지 못했습니다.</div>
                             ) : (blockedUsersQuery.data ?? []).length === 0 ? (

@@ -1,10 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useMemo, useState } from 'react'
 import { Navigate, useLocation, useNavigate, useParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import ProfileHeader from '../../components/ui/ProfileHeader'
 import Tabs from '../../components/ui/Tabs'
 import MasonryGrid from '../../components/ui/MasonryGrid'
-import { EntityProfileHeaderSkeleton } from '../../components/ui/EntitySkeletons'
 import { getPhotoAspectRatio, type Snap } from '../../constant/mock/snaps'
 import {
     disconnectFan,
@@ -22,6 +21,40 @@ import {
 import { queryKeys } from '../../services/queryKeys'
 
 const tabs = ['스냅', '정보']
+
+const StarProfileHeaderSkeleton: React.FC = () => (
+    <div
+        className="rounded-2xl border border-line bg-panel p-4 sm:p-6"
+        role="status"
+        aria-busy="true"
+        aria-label="스타 프로필 불러오는 중"
+    >
+        <div className="flex animate-pulse flex-col gap-4 sm:flex-row sm:items-start sm:gap-6" aria-hidden="true">
+            <span className="h-20 w-20 shrink-0 rounded-full bg-placeholder sm:h-24 sm:w-24 lg:h-28 lg:w-28" />
+            <div className="min-w-0 flex-1">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between lg:gap-6">
+                    <div className="space-y-2">
+                        <span className="block h-7 w-40 rounded bg-placeholder" />
+                        <span className="block h-4 w-32 rounded bg-placeholder" />
+                        <span className="block h-4 w-24 rounded bg-placeholder" />
+                    </div>
+                    <div className="grid grid-cols-3 gap-3 pt-1 sm:gap-5 lg:gap-8">
+                        {Array.from({ length: 3 }, (_, index) => (
+                            <div key={index} className="space-y-1.5 text-center">
+                                <span className="mx-auto block h-5 w-8 rounded bg-placeholder" />
+                                <span className="mx-auto block h-3 w-10 rounded bg-placeholder" />
+                            </div>
+                        ))}
+                    </div>
+                </div>
+                <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <span className="h-11 w-full rounded-xl bg-placeholder sm:w-24" />
+                    <span className="h-11 w-full rounded-xl bg-placeholder sm:w-20" />
+                </div>
+            </div>
+        </div>
+    </div>
+)
 
 const toSnapCard = (item: SnapFeedItem, index: number): Snap => ({
     id: item.snapData.snapId,
@@ -58,10 +91,10 @@ const getLikeCount = (item: SnapFeedItem): number => {
 
 const StarSnapPage: React.FC = () => {
     const navigate = useNavigate()
+    const queryClient = useQueryClient()
     const { starId } = useParams<{ starId: string }>()
     const location = useLocation()
     const [tab, setTab] = useState(tabs[0])
-    const [fanJoined, setFanJoined] = useState(false)
     const [fanLoading, setFanLoading] = useState(false)
     const stateStar = (location.state as { star?: StarSearchItem } | null)?.star ?? null
     const { name, nickname } = useMemo(() => {
@@ -156,17 +189,12 @@ const StarSnapPage: React.FC = () => {
         queryFn: () => getFanState(star!.id),
         enabled: !!star?.id,
     })
-
-    useEffect(() => {
-        if (typeof fanStateQuery.data === 'boolean') {
-            setFanJoined(fanStateQuery.data)
-        }
-    }, [fanStateQuery.data])
+    const fanJoined = fanStateQuery.data
 
     if (loading) {
         return (
             <div className="px-4 py-5 sm:px-6 sm:py-7 lg:px-8">
-                <EntityProfileHeaderSkeleton />
+                <StarProfileHeaderSkeleton />
             </div>
         )
     }
@@ -194,17 +222,23 @@ const StarSnapPage: React.FC = () => {
         navigate(`/stargroup/${resolvedStarGroupId}`)
     }
 
+    const groupLinkLoading =
+        !star.starGroup?.id &&
+        !!star.starGroup?.name?.trim() &&
+        starGroupsQuery.isLoading
+    const profileHeaderLoading = snapsQuery.isLoading || fanStateQuery.isLoading || groupLinkLoading
+
     const handleFanToggle = async () => {
-        if (!star?.id || fanLoading) return
+        if (!star.id || fanLoading || typeof fanJoined !== 'boolean') return
         setFanLoading(true)
 
         try {
             if (fanJoined) {
                 await disconnectFan(star.id)
-                setFanJoined(false)
+                queryClient.setQueryData(['fan-state', star.id], false)
             } else {
                 await joinFan(star.id)
-                setFanJoined(true)
+                queryClient.setQueryData(['fan-state', star.id], true)
             }
         } catch {
             window.alert('팬 등록 처리에 실패했습니다.')
@@ -215,42 +249,50 @@ const StarSnapPage: React.FC = () => {
 
     return (
         <div className="px-4 py-5 sm:px-6 sm:py-7 lg:px-8">
-            <ProfileHeader
-                name={star.name}
-                imageKey={star.imageKey}
-                lines={[
-                    resolvedStarGroupId ? (
-                        <>
-                            <button
-                                type="button"
-                                onClick={goToStarGroup}
-                                className="font-medium text-ink underline underline-offset-2 hover:text-brand cursor-pointer"
-                            >
-                                {star.starGroup?.name || '-'}
-                            </button>
-                            <span>{` · ${star.nickname || '-'}`}</span>
-                        </>
-                    ) : (
-                        `${star.starGroup?.name || '-'} · ${star.nickname || '-'}`
-                    ),
-                    profileMetaParts.join(' · '),
-                ]}
-                stats={[
-                    { value: stats.snapCountText, label: '스냅' },
-                    { value: '-', label: '팬' },
-                    { value: stats.likeCountText, label: '좋아요' },
-                ]}
-                actions={[
-                    {
-                        label: fanLoading ? '처리 중...' : fanJoined ? '팬 취소' : '팬 추가',
-                        variant: 'primary',
-                        onClick: () => {
-                            void handleFanToggle()
-                        },
-                    },
-                    { label: '공유', variant: 'outline' },
-                ]}
-            />
+            {profileHeaderLoading ? (
+                <StarProfileHeaderSkeleton />
+            ) : (
+                <ProfileHeader
+                    name={star.name}
+                    imageKey={star.imageKey}
+                    lines={[
+                        resolvedStarGroupId ? (
+                            <>
+                                <button
+                                    type="button"
+                                    onClick={goToStarGroup}
+                                    className="font-medium text-ink underline underline-offset-2 hover:text-brand cursor-pointer"
+                                >
+                                    {star.starGroup?.name || '-'}
+                                </button>
+                                <span>{` · ${star.nickname || '-'}`}</span>
+                            </>
+                        ) : (
+                            `${star.starGroup?.name || '-'} · ${star.nickname || '-'}`
+                        ),
+                        profileMetaParts.join(' · '),
+                    ]}
+                    stats={[
+                        { value: snapsQuery.isError ? '-' : stats.snapCountText, label: '스냅' },
+                        { value: '-', label: '팬' },
+                        { value: snapsQuery.isError ? '-' : stats.likeCountText, label: '좋아요' },
+                    ]}
+                    actions={[
+                        ...(typeof fanJoined === 'boolean'
+                            ? [
+                                  {
+                                      label: fanLoading ? '처리 중...' : fanJoined ? '팬 취소' : '팬 추가',
+                                      variant: 'primary' as const,
+                                      onClick: () => {
+                                          void handleFanToggle()
+                                      },
+                                  },
+                              ]
+                            : []),
+                        { label: '공유', variant: 'outline' },
+                    ]}
+                />
+            )}
 
             <div className="mt-6">
                 <Tabs items={tabs} active={tab} onChange={setTab} />

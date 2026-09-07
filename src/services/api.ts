@@ -60,6 +60,17 @@ export type VerifyEmailSuccess = {
   token: string;
 };
 
+export type PasswordResetRequestSuccess = {
+  message: string;
+  expiresInSeconds: number;
+  resendAfterSeconds: number;
+};
+
+export type PasswordResetVerifySuccess = {
+  resetToken: string;
+  expiresInSeconds: number;
+};
+
 export async function checkEmailAvailability(email: string): Promise<boolean> {
   const resp = await client.get('/auth/valid/email', { params: { email } });
   const data = resp.data;
@@ -90,6 +101,23 @@ export async function verifyEmailCode(email: string, verifyCode: string): Promis
 export async function signUp(payload: SignUpRequest): Promise<SignUpSuccess> {
   const resp = await client.post('/auth/signup', payload);
   return resp.data as SignUpSuccess;
+}
+
+export async function requestPasswordReset(email: string): Promise<PasswordResetRequestSuccess> {
+  const resp = await client.post('/auth/password-reset/request', { email });
+  return resp.data as PasswordResetRequestSuccess;
+}
+
+export async function verifyPasswordResetCode(
+  email: string,
+  code: string,
+): Promise<PasswordResetVerifySuccess> {
+  const resp = await client.post('/auth/password-reset/verify', { email, code });
+  return resp.data as PasswordResetVerifySuccess;
+}
+
+export async function confirmPasswordReset(resetToken: string, newPassword: string): Promise<void> {
+  await client.post('/auth/password-reset/confirm', { resetToken, newPassword });
 }
 
 export default client;

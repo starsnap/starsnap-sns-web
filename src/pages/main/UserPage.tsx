@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import ProfileHeader from '../../components/ui/ProfileHeader'
 import Tabs from '../../components/ui/Tabs'
 import MasonryGrid from '../../components/ui/MasonryGrid'
+import { EntityProfileHeaderSkeleton } from '../../components/ui/EntitySkeletons'
 import { MoreIcon } from '../../components/icons'
 import { getPhotoAspectRatio, makeSnaps, type Snap } from '../../constant/mock/snaps'
 import {
@@ -120,16 +121,26 @@ const UserPage: React.FC<Props> = ({ own = false }) => {
         enabled: isOtherUserPage,
     })
 
-    const loading =
-        (own && (profileQuery.isLoading || mySnapsQuery.isLoading || savedSnapsQuery.isLoading)) ||
-        (isOtherUserPage &&
-            (otherUserSnapsQuery.isLoading ||
-                otherUserProfileQuery.isLoading ||
-                friendsQuery.isLoading ||
-                receivedRequestsQuery.isLoading ||
-                sentRequestsQuery.isLoading))
+    const relationLoading =
+        isOtherUserPage &&
+        (friendsQuery.isLoading || receivedRequestsQuery.isLoading || sentRequestsQuery.isLoading)
+    const headerLoading = own
+        ? profileQuery.isLoading
+        : isOtherUserPage &&
+          (profileQuery.isLoading || otherUserProfileQuery.isLoading || relationLoading)
+    const contentLoading = own
+        ? tab === '저장됨'
+            ? savedSnapsQuery.isLoading
+            : mySnapsQuery.isLoading
+        : isOtherUserPage &&
+          (profileQuery.isLoading ||
+              otherUserSnapsQuery.isLoading ||
+              otherUserProfileQuery.isLoading ||
+              relationLoading)
     const error =
-        (own && (profileQuery.isError || mySnapsQuery.isError || savedSnapsQuery.isError)) ||
+        (own &&
+            (profileQuery.isError ||
+                (tab === '저장됨' ? savedSnapsQuery.isError : mySnapsQuery.isError))) ||
         (isOtherUserPage &&
             (otherUserSnapsQuery.isError ||
                 otherUserProfileQuery.isError ||
@@ -322,20 +333,23 @@ const UserPage: React.FC<Props> = ({ own = false }) => {
 
     return (
         <div className="px-4 sm:px-6 lg:px-8 py-5 sm:py-7">
-            <ProfileHeader
-                name={isOtherUserPage ? targetUsername : profile?.username ?? '사용자'}
-                imageKey={isOtherUserPage ? otherUserProfileImageKey : resolveProfileImageKey(profile)}
-                lines={[
-                    isOtherUserPage
-                        ? `@${targetUsername}`
-                        : profile
-                          ? `@${profile.username}`
-                          : '@사용자',
-                    '스타스냅 사용자',
-                ]}
-                actions={
-                    own
-                        ? [
+            {headerLoading ? (
+                <EntityProfileHeaderSkeleton />
+            ) : (
+                <ProfileHeader
+                    name={isOtherUserPage ? targetUsername : profile?.username ?? '사용자'}
+                    imageKey={isOtherUserPage ? otherUserProfileImageKey : resolveProfileImageKey(profile)}
+                    lines={[
+                        isOtherUserPage
+                            ? `@${targetUsername}`
+                            : profile
+                              ? `@${profile.username}`
+                              : '@사용자',
+                        '스타스냅 사용자',
+                    ]}
+                    actions={
+                        own
+                            ? [
                               {
                                   label: '프로필 수정',
                                   variant: 'outline',
@@ -385,11 +399,11 @@ const UserPage: React.FC<Props> = ({ own = false }) => {
                                                 navigate(`/message?user=${encodeURIComponent(targetUsername)}`),
                                         },
                                     ]),
-                          ]
-                }
-                actionMenu={
-                    isOtherUserPage ? (
-                        <div className="relative" ref={reportMenuRef}>
+                              ]
+                    }
+                    actionMenu={
+                        isOtherUserPage ? (
+                            <div className="relative" ref={reportMenuRef}>
                             <button
                                 type="button"
                                 className="h-11 w-11 inline-flex items-center justify-center rounded-xl border border-line bg-panel text-sub hover:bg-surface"
@@ -409,10 +423,11 @@ const UserPage: React.FC<Props> = ({ own = false }) => {
                                     </button>
                                 </div>
                             )}
-                        </div>
-                    ) : null
-                }
-            />
+                            </div>
+                        ) : null
+                    }
+                />
+            )}
 
             {tabs.length > 1 && (
                 <div className="mt-5 sm:mt-6">
@@ -420,7 +435,7 @@ const UserPage: React.FC<Props> = ({ own = false }) => {
                 </div>
             )}
 
-            {loading ? (
+            {contentLoading ? (
                 <div className="mt-5 sm:mt-6">
                     <MasonryGrid
                         snaps={[]}

@@ -109,7 +109,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ surface = 'social' }) => {
                             height={96}
                             className="h-10 w-10 shrink-0 rounded-xl object-cover"
                         />
-                        {isChatSurface ? 'StarSnap Chat' : 'StarSnap'}
+                        {isChatSurface ? 'StarSnap Chat' : isBibleSurface ? 'StarSnap Bible' : 'StarSnap'}
                     </h1>
                     <p className="mt-2 text-sm text-sub">
                         {loginSubtitle}
@@ -148,6 +148,26 @@ const LoginPage: React.FC<LoginPageProps> = ({ surface = 'social' }) => {
                             onChange={(e) => setPassword(e.target.value)}
                             autoComplete="current-password"
                         />
+                        {!isBibleSurface && (
+                            <div className="mt-1 flex justify-end">
+                                {isChatSurface ? (
+                                    <a
+                                        href={getSocialAppUrl('/forgot-password')}
+                                        className="inline-flex min-h-11 items-center rounded-lg px-1.5 text-sm font-semibold text-sub underline decoration-brand decoration-2 underline-offset-4"
+                                    >
+                                        SNS에서 비밀번호 찾기
+                                    </a>
+                                ) : (
+                                    <button
+                                        type="button"
+                                        onClick={() => navigate('/forgot-password')}
+                                        className="min-h-11 rounded-lg px-1.5 text-sm font-semibold text-sub underline decoration-brand decoration-2 underline-offset-4"
+                                    >
+                                        비밀번호를 잊으셨나요?
+                                    </button>
+                                )}
+                            </div>
+                        )}
                     </div>
 
                     {errorMessage && <p className="text-sm text-danger" role="alert">{errorMessage}</p>}

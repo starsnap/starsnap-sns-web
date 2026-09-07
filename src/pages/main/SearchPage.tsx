@@ -4,8 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { SearchIcon } from '../../components/icons'
 import CategoryChips from '../../components/ui/CategoryChips'
 import MasonryGrid from '../../components/ui/MasonryGrid'
-import { StarListSkeleton } from '../../components/ui/EntitySkeletons'
-import { getPhotoAspectRatio, type Snap } from '../../constant/mock/snaps'
+import { getFallbackAspectRatio, getPhotoAspectRatio, type Snap } from '../../constant/mock/snaps'
 import {
     getFeedSnaps,
     getPopularSearchKeywords,
@@ -41,6 +40,99 @@ type ExploreTab = (typeof EXPLORE_TABS)[number]
 
 const PREVIEW_SIZE = 6
 const FULL_SIZE = 48
+const keywordSkeletonWidths = ['w-16', 'w-20', 'w-14', 'w-24'] as const
+const previewEntitySections = ['w-12', 'w-14', 'w-20'] as const
+const previewEntityCards = Array.from({ length: 3 })
+const previewSnapCards = Array.from({ length: PREVIEW_SIZE })
+
+const PopularKeywordSkeleton: React.FC = () => (
+    <div
+        className="mt-4 flex flex-wrap items-center gap-2"
+        role="status"
+        aria-busy="true"
+        aria-label="인기 검색어 불러오는 중"
+    >
+        <span className="mr-1 h-4 w-20 rounded bg-placeholder animate-pulse" aria-hidden="true" />
+        {keywordSkeletonWidths.map((width, index) => (
+            <span
+                key={`${width}-${index}`}
+                className={`h-11 ${width} rounded-full bg-placeholder animate-pulse`}
+                aria-hidden="true"
+            />
+        ))}
+    </div>
+)
+
+const SearchPreviewSkeleton: React.FC = () => (
+    <div className="space-y-8" role="status" aria-busy="true" aria-label="통합 검색 결과 불러오는 중">
+        {previewEntitySections.map((headingWidth, sectionIndex) => (
+            <section key={`${headingWidth}-${sectionIndex}`} aria-hidden="true">
+                <span className={`mb-3 block h-6 ${headingWidth} rounded bg-placeholder animate-pulse`} />
+                <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+                    {previewEntityCards.map((_, cardIndex) => (
+                        <div
+                            key={cardIndex}
+                            className="rounded-2xl border border-line bg-panel p-5 animate-pulse"
+                        >
+                            <div className="flex items-center gap-4">
+                                <span className="h-14 w-14 shrink-0 rounded-full bg-placeholder" />
+                                <div className="min-w-0 flex-1 space-y-2">
+                                    <span className="block h-5 w-2/5 rounded bg-placeholder" />
+                                    <span className="block h-3.5 w-3/5 rounded bg-placeholder" />
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </section>
+        ))}
+
+        <section aria-hidden="true">
+            <span className="mb-3 block h-6 w-14 rounded bg-placeholder animate-pulse" />
+            <div className="snap-masonry columns-2 md:columns-3 xl:columns-5">
+                {previewSnapCards.map((_, index) => (
+                    <div key={index} className="overflow-hidden rounded-2xl border border-line bg-panel">
+                        <div className="animate-pulse">
+                            <div className="bg-placeholder" style={{ aspectRatio: getFallbackAspectRatio(index) }} />
+                            <div className="flex items-center gap-2 px-3 py-2.5">
+                                <span className="h-6 w-6 shrink-0 rounded-full bg-placeholder" />
+                                <span className="h-3 w-20 rounded bg-placeholder" />
+                            </div>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </section>
+    </div>
+)
+
+const SearchEntityListSkeleton: React.FC<{
+    label: string
+    secondary?: boolean
+}> = ({ label, secondary = false }) => (
+    <div
+        className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3"
+        role="status"
+        aria-label={label}
+        aria-busy="true"
+    >
+        {Array.from({ length: 9 }).map((_, index) => (
+            <div
+                key={index}
+                className="rounded-2xl border border-line bg-panel p-5 animate-pulse"
+                aria-hidden="true"
+            >
+                <div className="flex h-14 items-center gap-4">
+                    <span className="h-14 w-14 shrink-0 rounded-full bg-placeholder" />
+                    <div className="min-w-0 flex-1 space-y-2">
+                        <span className="block h-5 w-2/5 rounded bg-placeholder" />
+                        {secondary && <span className="block h-3.5 w-3/5 rounded bg-placeholder" />}
+                    </div>
+                </div>
+            </div>
+        ))}
+    </div>
+)
 
 const EmptyMessage: React.FC<{ text: string }> = ({ text }) => (
     <p className="text-sm text-sub">{text}</p>
@@ -300,18 +392,22 @@ const SearchPage: React.FC = () => {
                 </div>
 
                 {tab === '전체' && !isSearching && (
-                    <div className="mt-4 flex flex-wrap items-center gap-2">
-                        <span className="text-sm text-muted mr-1">인기 검색어</span>
-                        {trending.map((t) => (
-                            <button
-                                key={t}
-                                onClick={() => setQuery(t)}
-                                className="min-h-11 px-4 rounded-full bg-surface text-sub text-sm border border-line hover:bg-panel"
-                            >
-                                {t}
-                            </button>
-                        ))}
-                    </div>
+                    popularKeywordsQuery.isLoading ? (
+                        <PopularKeywordSkeleton />
+                    ) : (
+                        <div className="mt-4 flex flex-wrap items-center gap-2">
+                            <span className="text-sm text-muted mr-1">인기 검색어</span>
+                            {trending.map((t) => (
+                                <button
+                                    key={t}
+                                    onClick={() => setQuery(t)}
+                                    className="min-h-11 px-4 rounded-full bg-surface text-sub text-sm border border-line hover:bg-panel"
+                                >
+                                    {t}
+                                </button>
+                            ))}
+                        </div>
+                    )
                 )}
             </div>
 
@@ -324,7 +420,7 @@ const SearchPage: React.FC = () => {
                     (isSearching ? (
                         <div className="space-y-8">
                             {previewLoading ? (
-                                <StarListSkeleton />
+                                <SearchPreviewSkeleton />
                             ) : !hasPreviewResults ? (
                                 <EmptyMessage text={`'${debouncedQuery}'에 대한 검색 결과가 없습니다.`} />
                             ) : (
@@ -417,7 +513,7 @@ const SearchPage: React.FC = () => {
 
                 {tab === '유저' &&
                     (usersFullQuery.isLoading ? (
-                        <StarListSkeleton />
+                        <SearchEntityListSkeleton label="유저 검색 결과를 불러오는 중" />
                     ) : usersFull.length === 0 ? (
                         <EmptyMessage text="표시할 유저가 없습니다." />
                     ) : (
@@ -434,7 +530,7 @@ const SearchPage: React.FC = () => {
 
                 {tab === '스타' &&
                     (starsFullQuery.isLoading ? (
-                        <StarListSkeleton />
+                        <SearchEntityListSkeleton label="스타 검색 결과를 불러오는 중" secondary />
                     ) : starsFull.length === 0 ? (
                         <EmptyMessage text="표시할 스타가 없습니다." />
                     ) : (
@@ -451,7 +547,7 @@ const SearchPage: React.FC = () => {
 
                 {tab === '스타그룹' &&
                     (starGroupsFullQuery.isLoading ? (
-                        <StarListSkeleton />
+                        <SearchEntityListSkeleton label="스타그룹 검색 결과를 불러오는 중" />
                     ) : starGroupsFull.length === 0 ? (
                         <EmptyMessage text="표시할 스타그룹이 없습니다." />
                     ) : (

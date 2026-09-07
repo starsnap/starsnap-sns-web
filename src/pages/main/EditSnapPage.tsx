@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { ChevronLeftIcon, CheckIcon, CloseIcon, PlusIcon, SearchIcon } from '../../components/icons'
 import Toggle from '../../components/ui/Toggle'
+import { EntitySelectionGridSkeleton, EntitySelectionStripSkeleton } from '../../components/ui/EntitySkeletons'
 import type { SnapFeedItem, StarGroupSearchItem, StarSearchItem } from '../../services/snapService'
 import { searchStarGroups, searchStars, updateSnap } from '../../services/snapService'
 import { applyNextImageCandidate, getImageCandidates } from '../../utils/s3Image'
@@ -51,6 +52,8 @@ const EditSnapPage: React.FC = () => {
     const [modalSelectedStarGroups, setModalSelectedStarGroups] = useState<StarGroupSearchItem[]>([])
     const [starLoading, setStarLoading] = useState(false)
     const [starGroupLoading, setStarGroupLoading] = useState(false)
+    const [selectedStarsLoading, setSelectedStarsLoading] = useState(false)
+    const [selectedStarGroupsLoading, setSelectedStarGroupsLoading] = useState(false)
 
     const allStarsQuery = useMemo(() => {
         const snapRecord = (feedItem?.snapData ?? {}) as Record<string, unknown>
@@ -105,6 +108,7 @@ const EditSnapPage: React.FC = () => {
         }
 
         let cancelled = false
+        setSelectedStarsLoading(true)
 
         searchStars('', 0, 500)
             .then((items) => {
@@ -128,6 +132,7 @@ const EditSnapPage: React.FC = () => {
         }
 
         let cancelled = false
+        setSelectedStarGroupsLoading(true)
 
         searchStarGroups('', 0, 500)
             .then((items) => {
@@ -159,8 +164,8 @@ const EditSnapPage: React.FC = () => {
     useEffect(() => {
         if (!starModalOpen) return
         let cancelled = false
+        setStarLoading(true)
         const timer = setTimeout(() => {
-            setStarLoading(true)
             searchStars(starQuery.trim())
                 .then((items) => {
                     if (!cancelled) setStarResults(items)
@@ -182,8 +187,8 @@ const EditSnapPage: React.FC = () => {
     useEffect(() => {
         if (!starGroupModalOpen) return
         let cancelled = false
+        setStarGroupLoading(true)
         const timer = setTimeout(() => {
-            setStarGroupLoading(true)
             searchStarGroups(starGroupQuery.trim())
                 .then((items) => {
                     if (!cancelled) setStarGroupResults(items)
@@ -378,6 +383,8 @@ const EditSnapPage: React.FC = () => {
                             <p className="mt-1.5 text-sm text-sub text-center">추가하기</p>
                         </div>
 
+                        {selectedStarsLoading && <EntitySelectionStripSkeleton />}
+
                         {selectedStars.map((star) => (
                             <div key={`${star.id || 'name'}-${star.name}`} className="shrink-0 w-[92px]">
                                 <div className="relative w-[72px] h-[72px] rounded-full bg-placeholder border border-line overflow-hidden mx-auto">
@@ -423,6 +430,8 @@ const EditSnapPage: React.FC = () => {
                             </button>
                             <p className="mt-1.5 text-sm text-sub text-center">추가하기</p>
                         </div>
+
+                        {selectedStarGroupsLoading && <EntitySelectionStripSkeleton variant="group" />}
 
                         {selectedStarGroups.map((group) => (
                             <div key={group.id} className="shrink-0 w-[112px]">
@@ -525,7 +534,7 @@ const EditSnapPage: React.FC = () => {
                             </div>
 
                             {starLoading ? (
-                                <p className="mt-4 text-sm text-muted">검색 중...</p>
+                                <EntitySelectionGridSkeleton />
                             ) : (
                                 <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                                     {starResults.map((star) => {
@@ -630,7 +639,7 @@ const EditSnapPage: React.FC = () => {
                             </div>
 
                             {starGroupLoading ? (
-                                <p className="mt-4 text-sm text-muted">검색 중...</p>
+                                <EntitySelectionGridSkeleton variant="group" />
                             ) : (
                                 <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                                     {starGroupResults.map((group) => {

@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import SignupPage from "../pages/auth/SignupPage";
 import LoginPage from "../pages/auth/LoginPage";
+import ForgotPasswordPage from "../pages/auth/ForgotPasswordPage";
 import MainLayout from '../pages/main/MainLayout';
 import HomePage from '../pages/main/HomePage';
 import StarPage from '../pages/main/StarPage';
@@ -64,6 +65,7 @@ const SocialRoutes = () => {
 
             <Route path="/signup" element={<SignupPage/>} />
             <Route path="/login" element={<LoginPage/>} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage/>} />
             <Route path="/oauth/signup" element={<SignupPage/>} />
         </Routes>
     )

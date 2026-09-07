@@ -104,5 +104,5 @@ npm run cypress:run
 - [회원가입 흐름](README_SIGNUP.md)
 - [웹 디자인 시스템](design-system/README.md)
 - [공통 디자인 시스템](../../DESIGN_SYSTEM.md)
-- [메인 API 명세](../starsnap-backend/API_SPEC.md)
+- [메인 API 명세](../starsnap-sns-server/API_SPEC.md)
 - [Main 통합 개요](../README.md)

@@ -2,6 +2,7 @@ import React, { useRef, useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ImageIcon, CloseIcon, PlusIcon, CalendarIcon, LinkIcon, SearchIcon, CheckIcon } from '../../components/icons'
 import Toggle from '../../components/ui/Toggle'
+import { EntitySelectionGridSkeleton } from '../../components/ui/EntitySkeletons'
 import {
     uploadPhoto,
     createSnap,
@@ -123,8 +124,8 @@ const AddSnapPage: React.FC = () => {
     useEffect(() => {
         if (!starModalOpen) return
         let cancelled = false
+        setStarLoading(true)
         const timer = setTimeout(() => {
-            setStarLoading(true)
             searchStars(starQuery.trim())
                 .then((items) => {
                     if (cancelled) return
@@ -148,8 +149,8 @@ const AddSnapPage: React.FC = () => {
     useEffect(() => {
         if (!starGroupModalOpen) return
         let cancelled = false
+        setStarGroupLoading(true)
         const timer = setTimeout(() => {
-            setStarGroupLoading(true)
             searchStarGroups(starGroupQuery.trim())
                 .then((items) => {
                     if (cancelled) return
@@ -621,7 +622,7 @@ const AddSnapPage: React.FC = () => {
                             </div>
 
                             {starLoading ? (
-                                <p className="mt-4 text-sm text-muted">검색 중...</p>
+                                <EntitySelectionGridSkeleton />
                             ) : (
                                 <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                                     {starResults.map((star) => {
@@ -726,7 +727,7 @@ const AddSnapPage: React.FC = () => {
                             </div>
 
                             {starGroupLoading ? (
-                                <p className="mt-4 text-sm text-muted">검색 중...</p>
+                                <EntitySelectionGridSkeleton variant="group" />
                             ) : (
                                 <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                                     {starGroupResults.map((group) => {
