@@ -16,8 +16,7 @@ services:
       replicas: ${SNS_WEB_REPLICAS:-1}
       placement:
         constraints:
-          - node.role == manager
-          - node.labels.starsnap.actions-runner == true
+          - node.hostname == swarm-worker-02
       update_config:
         parallelism: 1
         order: start-first

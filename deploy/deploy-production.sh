@@ -8,12 +8,12 @@ readonly script_dir
 # shellcheck source=/dev/null
 source "$script_dir/service.conf"
 : "${SERVICE_NAME:?SERVICE_NAME is required in service.conf}"
+: "${TARGET_NODE:?TARGET_NODE is required in service.conf}"
 : "${EXPECTED_IMAGE_REPOSITORY:?EXPECTED_IMAGE_REPOSITORY is required in service.conf}"
 : "${ROLLOUT_TIMEOUT_SECONDS:?ROLLOUT_TIMEOUT_SECONDS is required in service.conf}"
 
 readonly manager_address='192.168.1.103'
 readonly manager_label='starsnap.actions-runner'
-readonly local_image_registry='starsnap.invalid/starsnap-platform-local'
 readonly lock_path="${STARSNAP_DEPLOY_LOCK_PATH:-/runner-state/starsnap-production-deploy.lock}"
 readonly candidate_image="${STARSNAP_DEPLOY_IMAGE:?STARSNAP_DEPLOY_IMAGE is required}"
 readonly pull_image="${STARSNAP_PULL_IMAGE:?STARSNAP_PULL_IMAGE is required}"
@@ -25,14 +25,19 @@ previous_image=''
 previous_task_hash=''
 update_attempted=0
 
-single_running_container() {
-  local container_ids
-  container_ids="$(docker ps \
-    --filter "label=com.docker.swarm.service.name=$service_name" \
-    --filter status=running \
-    --format '{{.ID}}')"
-  test "$(awk 'NF {count++} END {print count + 0}' <<<"$container_ids")" -eq 1
-  awk 'NF {print; exit}' <<<"$container_ids"
+single_running_task() {
+  local task_ids
+  task_ids="$(docker service ps "$service_name" --filter desired-state=running --quiet)" || return 1
+  test "$(awk 'NF {count++} END {print count + 0}' <<<"$task_ids")" -eq 1 || return 1
+  awk 'NF {print; exit}' <<<"$task_ids"
+}
+
+service_is_on_target() {
+  local task
+  task="$(single_running_task)" || return 1
+  test "$(docker inspect --type task --format '{{.NodeID}}' "$task")" = "$target_node_id" || return 1
+  docker service inspect --format '{{range .Spec.TaskTemplate.Placement.Constraints}}{{println .}}{{end}}' "$service_name" \
+    | tr -d '[:blank:]' | grep -Fxq "node.hostname==$TARGET_NODE"
 }
 
 task_template_hash() {
@@ -41,7 +46,7 @@ task_template_hash() {
 }
 
 service_is_healthy() {
-  local container health replicas update_state
+  local task replicas update_state
   replicas="$(docker service ls --filter "name=$service_name" \
     --format '{{.Name}} {{.Replicas}}' \
     | awk -v target="$service_name" '$1 == target {print $2}')" || return 1
@@ -50,11 +55,12 @@ service_is_healthy() {
     --format '{{if .UpdateStatus}}{{.UpdateStatus.State}}{{else}}completed{{end}}' \
     "$service_name" 2>/dev/null)" || return 1
   [[ "$update_state" =~ ^(completed|rollback_completed)$ ]] || return 1
-  container="$(single_running_container)" || return 1
-  health="$(docker inspect \
-    --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \
-    "$container")" || return 1
-  test "$health" = 'healthy'
+  task="$(single_running_task)" || return 1
+  # Swarm keeps healthchecked containers in Starting until their check passes.
+  test "$(docker inspect --type task --format '{{.Status.State}}' "$task")" = running || return 1
+  test "$(docker inspect --type task --format '{{.Spec.ContainerSpec.Image}}' "$task")" \
+    = "$(docker service inspect --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}' "$service_name")"
+
 }
 
 wait_for_candidate() {
@@ -73,8 +79,8 @@ wait_for_candidate() {
         return 1
         ;;
     esac
-    if [[ "$current_image" == "$local_image" && "$update_state" == 'completed' ]] \
-      && service_is_healthy; then
+    if [[ "$current_image" == "$runtime_image" && "$update_state" == 'completed' ]] \
+      && service_is_healthy && service_is_on_target; then
       return 0
     fi
     sleep 3
@@ -137,6 +143,10 @@ readonly labeled_nodes
 test "$(awk 'NF {count++} END {print count + 0}' <<<"$labeled_nodes")" -eq 1
 test "$labeled_nodes" = "$node_id"
 
+target_node_id="$(docker node inspect --format '{{if and (eq .Status.State "ready") (eq .Spec.Availability "active") (eq .Spec.Role "worker")}}{{.ID}}{{end}}' "$TARGET_NODE")"
+readonly target_node_id
+test -n "$target_node_id"
+
 command -v flock >/dev/null
 case "$lock_path" in
   /runner-state/*) ;;
@@ -165,10 +175,7 @@ repo_digests="$(docker image inspect \
   --format '{{range .RepoDigests}}{{println .}}{{end}}' "$pull_image")"
 readonly repo_digests
 test "$(grep -Fxc "$candidate_image" <<<"$repo_digests")" -eq 1
-readonly local_image="$local_image_registry/${service_name//_/-}:sha-$digest"
-docker tag "$pull_image" "$local_image"
-test "$(docker image inspect --format '{{.Id}}' "$pull_image")" \
-  = "$(docker image inspect --format '{{.Id}}' "$local_image")"
+readonly runtime_image="$candidate_image"
 
 previous_image="$(docker service inspect \
   --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}' "$service_name")"
@@ -177,27 +184,31 @@ previous_task_hash="$(task_template_hash)"
 readonly previous_task_hash
 [[ "$previous_task_hash" =~ ^[0-9a-f]{64}$ ]]
 
-if [[ "$previous_image" == "$local_image" ]]; then
-  current_container="$(single_running_container)"
-  readonly current_container
-  if [[ "$(docker inspect --format '{{.Image}}' "$current_container")" \
-      == "$(docker image inspect --format '{{.Id}}' "$local_image")" ]] \
-    && service_is_healthy; then
-    trap - ERR HUP INT TERM
-    printf 'Deployment already current: service=%s image=%s\n' \
-      "$service_name" "$candidate_image"
-    exit 0
-  fi
+if [[ "$previous_image" == "$runtime_image" ]] && service_is_healthy && service_is_on_target; then
+  trap - ERR HUP INT TERM
+  printf 'Deployment already current: service=%s image=%s\n' "$service_name" "$candidate_image"
+  exit 0
+fi
+
+placement_args=()
+has_target_constraint=false
+while IFS= read -r constraint; do
+  case "${constraint//[[:space:]]/}" in
+    "node.hostname==$TARGET_NODE") has_target_constraint=true ;;
+    node.id==*|node.hostname==*|node.role==*|node.labels.starsnap.actions-runner==*)
+      placement_args+=(--constraint-rm "$constraint") ;;
+  esac
+done < <(docker service inspect --format '{{range .Spec.TaskTemplate.Placement.Constraints}}{{println .}}{{end}}' "$service_name")
+if [[ "$has_target_constraint" != true ]]; then
+  placement_args+=(--constraint-add "node.hostname==$TARGET_NODE")
 fi
 
 update_attempted=1
-docker service update --detach=true --no-resolve-image \
-  --image "$local_image" "$service_name" >/dev/null
+docker service update --detach=true --no-resolve-image --with-registry-auth \
+  "${placement_args[@]}" \
+  --image "$runtime_image" "$service_name" >/dev/null
 wait_for_candidate
-deployed_container="$(single_running_container)"
-readonly deployed_container
-test "$(docker inspect --format '{{.Image}}' "$deployed_container")" \
-  = "$(docker image inspect --format '{{.Id}}' "$local_image")"
+service_is_on_target
 
 trap - ERR HUP INT TERM
 printf 'Scoped deployment verified: service=%s image=%s\n' \

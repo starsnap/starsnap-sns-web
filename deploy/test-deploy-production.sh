@@ -9,7 +9,7 @@ readonly candidate_digest
 readonly candidate_image="$EXPECTED_IMAGE_REPOSITORY@sha256:$candidate_digest"
 pull_image="$EXPECTED_IMAGE_REPOSITORY:sha-$(printf 'b%.0s' {1..40})"
 readonly pull_image
-readonly local_image="starsnap.invalid/starsnap-platform-local/${SERVICE_NAME//_/-}:sha-$candidate_digest"
+readonly local_image="$candidate_image"
 readonly previous_image='registry.invalid/example@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
 
 docker() {
@@ -19,7 +19,9 @@ docker() {
       if [[ "$*" == *Swarm.ControlAvailable* ]]; then printf '%s\n' true; else printf '%s\n' node-1; fi
       ;;
     'node inspect')
-      if [[ "$*" == *Status.Addr* ]]; then printf '%s\n' 192.168.1.103
+      if [[ "${!#}" == "$TARGET_NODE" ]]; then
+        if [[ "${FAKE_TARGET_UNAVAILABLE:-false}" != true ]]; then printf '%s\n' worker-1; fi
+      elif [[ "$*" == *Status.Addr* ]]; then printf '%s\n' 192.168.1.103
       elif [[ "$*" == *Spec.Role* ]]; then printf '%s\n' manager
       else printf '%s\n' true
       fi
@@ -31,6 +33,7 @@ docker() {
       if [[ "$*" != *' --format '* ]]; then return 0; fi
       format="$4"
       if [[ "$format" == *Spec.TaskTemplate.ContainerSpec.Image* ]]; then cat "$FAKE_STATE/image"
+      elif [[ "$format" == *Placement.Constraints* ]]; then cat "$FAKE_STATE/placement"
       elif [[ "$format" == *Spec.TaskTemplate* ]]; then cat "$FAKE_STATE/template"
       elif [[ "$format" == *UpdateStatus* ]]; then cat "$FAKE_STATE/update-state"
       elif [[ "$format" == *FailureAction* ]]; then printf '%s\n' rollback
@@ -39,6 +42,14 @@ docker() {
       ;;
     'service ls') printf '%s 1/1\n' "$SERVICE_NAME" ;;
     'service update')
+      [[ " $* " == *" --with-registry-auth "* ]]
+      [[ " $* " != *" --constraint-rm node.hostname==$TARGET_NODE "* ]]
+      [[ " $* " == *" --constraint-add node.hostname==$TARGET_NODE "* ]] \
+        || tr -d '[:blank:]' <"$FAKE_STATE/placement" | grep -Fxq "node.hostname==$TARGET_NODE"
+      if [[ " $* " == *" --constraint-add node.hostname==$TARGET_NODE "* ]]; then
+        printf '%s\n' "node.hostname==$TARGET_NODE" >"$FAKE_STATE/placement"
+      fi
+      printf '%s' worker-1 >"$FAKE_STATE/node"
       printf '%s' "$local_image" >"$FAKE_STATE/image"
       printf '%s' '{"candidate":true}' >"$FAKE_STATE/template"
       printf '%s' completed >"$FAKE_STATE/update-state"
@@ -51,6 +62,8 @@ docker() {
       printf '%s\n' update >>"$FAKE_STATE/events"
       ;;
     'service rollback')
+      printf '%s' manager-1 >"$FAKE_STATE/node"
+      printf '%s\n' 'node.role == manager' >"$FAKE_STATE/placement"
       printf '%s' "$previous_image" >"$FAKE_STATE/image"
       printf '%s' '{"candidate":false}' >"$FAKE_STATE/template"
       printf '%s' rollback_completed >"$FAKE_STATE/update-state"
@@ -58,8 +71,16 @@ docker() {
       printf '%s' healthy >"$FAKE_STATE/health"
       printf '%s\n' rollback >>"$FAKE_STATE/events"
       ;;
-    'service ps') return 0 ;;
-    'ps --filter') printf '%s\n' container-1 ;;
+    'service ps') printf '%s\n' task-1 ;;
+    'ps --filter') echo 'Manager-local container lookup is forbidden' >&2; return 1 ;;
+    'inspect --type')
+      if [[ "$*" == *Status.State* ]]; then
+        if [[ "$(cat "$FAKE_STATE/health")" == healthy ]]; then printf '%s\n' running; else printf '%s\n' starting; fi
+      elif [[ "$*" == *NodeID* ]]; then cat "$FAKE_STATE/node"
+      elif [[ "$*" == *Spec.ContainerSpec.Image* ]]; then cat "$FAKE_STATE/image"
+      else return 1
+      fi
+      ;;
     'inspect --format')
       if [[ "$3" == *State.Health* ]]; then cat "$FAKE_STATE/health"
       elif [[ "$3" == *'.Image'* ]]; then cat "$FAKE_STATE/container-image"
@@ -90,6 +111,8 @@ reset_state() {
   printf '%s' completed >"$FAKE_STATE/update-state"
   printf '%s' previous-id >"$FAKE_STATE/container-image"
   printf '%s' healthy >"$FAKE_STATE/health"
+  printf '%s' manager-1 >"$FAKE_STATE/node"
+  printf '%s\n' 'node.role == manager' >"$FAKE_STATE/placement"
   : >"$FAKE_STATE/events"
 }
 
@@ -101,7 +124,7 @@ run_deploy() {
 }
 
 FAKE_STATE="$(mktemp -d)"
-export FAKE_STATE SERVICE_NAME candidate_image pull_image local_image previous_image
+export FAKE_STATE SERVICE_NAME TARGET_NODE candidate_image pull_image local_image previous_image
 trap 'rm -rf -- "$FAKE_STATE"' EXIT
 
 reset_state
@@ -127,5 +150,27 @@ fi
 grep -Fxq rollback "$FAKE_STATE/events"
 test "$(cat "$FAKE_STATE/image")" = "$previous_image"
 test "$(cat "$FAKE_STATE/health")" = healthy
+
+unset FAKE_CANDIDATE_UNHEALTHY
+reset_state
+export FAKE_TARGET_UNAVAILABLE=true
+if run_deploy >/dev/null 2>&1; then
+  echo 'Expected unavailable worker preflight to fail.' >&2
+  exit 1
+fi
+test ! -s "$FAKE_STATE/events"
+unset FAKE_TARGET_UNAVAILABLE
+
+reset_state
+printf '%s' worker-1 >"$FAKE_STATE/node"
+printf '%s\n' "node.hostname==$TARGET_NODE" >"$FAKE_STATE/placement"
+run_deploy | grep -Fq 'Scoped deployment verified'
+grep -Fxq "node.hostname==$TARGET_NODE" "$FAKE_STATE/placement"
+
+reset_state
+printf '%s' worker-1 >"$FAKE_STATE/node"
+printf '%s\n' "node.hostname == $TARGET_NODE" >"$FAKE_STATE/placement"
+run_deploy | grep -Fq 'Scoped deployment verified'
+grep -Fxq "node.hostname == $TARGET_NODE" "$FAKE_STATE/placement"
 
 echo 'deploy-production tests passed'
