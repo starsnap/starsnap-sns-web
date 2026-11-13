@@ -27,6 +27,44 @@ function pageFunction(name, env) {
     return compile(`export const subject = ${initializer.getText(pageAST)}`, env).subject
 }
 
+test('socket waits for authenticated REST refresh before opening a new handshake', async () => {
+    const response = deferred()
+    const state = {
+        closed: false, socket: null, wsRef: { current: null },
+        roomsRefetchRef: { current: () => response.promise },
+        createChatWebSocket: () => ({}),
+        scheduleReconnect: () => assert.fail('successful auth must not retry'),
+    }
+    const pending = pageFunction('connect', state)()
+    assert.equal(state.wsRef.current, null)
+    response.resolve({ isError: false })
+    await pending
+    assert.ok(state.wsRef.current)
+})
+
+test('failed REST authentication retries without opening a socket', async () => {
+    let retries = 0
+    const state = {
+        closed: false, roomsRefetchRef: { current: async () => ({ isError: true }) },
+        createChatWebSocket: () => assert.fail('failed auth must not open socket'),
+        scheduleReconnect: () => { retries += 1 },
+    }
+    await pageFunction('connect', state)()
+    assert.equal(retries, 1)
+})
+
+test('closing the page during REST refresh prevents a late socket connection', async () => {
+    const response = deferred()
+    const state = {
+        closed: false, roomsRefetchRef: { current: () => response.promise },
+        createChatWebSocket: () => assert.fail('closed page must not reconnect'),
+    }
+    const pending = pageFunction('connect', state)()
+    state.closed = true
+    response.resolve({ isError: false })
+    await pending
+})
+
 const message = (id, content = id, status = 'NORMAL') => ({
     id, content, status, roomId: 'a', senderUserId: 'user', senderUsername: 'user', createdAt: id.padStart(4, '0'),
 })

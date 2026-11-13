@@ -8,7 +8,7 @@ import {
     ChatMessageListSkeleton,
     ChatRoomListSkeleton,
 } from '../../components/ui/ChatSkeletons'
-import { FiEdit2, FiLogOut, FiMoreVertical, FiPlus, FiTrash2, FiUserPlus } from 'react-icons/fi'
+import { FiEdit2, FiLogOut, FiMoreVertical, FiPaperclip, FiPlus, FiTrash2, FiUserPlus, FiX } from 'react-icons/fi'
 import {
     getMyFriends,
     getMyProfile,
@@ -19,11 +19,13 @@ import {
 import { applyNextImageCandidate, getImageCandidates } from '../../utils/s3Image'
 import { useAccessibleDialog } from '../../hooks/useAccessibleDialog'
 import { loadChatHistory, mergeChatHistory, type ChatMessageChange } from '../../services/chat/chatHistory'
+import { chatMediaAccept, validateChatMedia } from '../../services/chat/chatMedia'
 import {
     addChatRoomMembers,
     createChatRoom,
     createChatWebSocket,
     deleteChatMessage,
+    getChatAttachmentUrl,
     getChatHistory,
     getChatRooms,
     isChatMessageRateLimitedFrame,
@@ -31,6 +33,7 @@ import {
     isChatMessageDeletedFrame,
     isChatMessageUpdatedFrame,
     leaveChatRoom,
+    sendChatAttachment,
     sendChatTyping,
     updateChatMessage,
     type ChatMessage,
@@ -58,10 +61,17 @@ const MESSAGE_RATE_WINDOW_MS = 10_000
 const MESSAGE_RATE_WINDOW_LIMIT = 5
 const MESSAGE_RATE_LIMIT_SECONDS = 30
 const DEFAULT_MESSAGE_RATE_LIMIT_MESSAGE = '메시지를 너무 빠르게 보내고 있어요.'
+const MAX_ATTACHMENT_CAPTION_LENGTH = 4096
 
 type PendingSendDraft = {
     roomId: string
     content: string
+}
+
+type AttachmentDraft = {
+    file: File
+    caption: string
+    error?: string
 }
 
 type MessagePageProps = {
@@ -149,10 +159,54 @@ const isDirectRoomWithUser = (room: ChatRoomSummary, myUserId: string, userId: s
 const messageDisplayText = (message: ChatMessage) =>
     message.status === 'DELETED' ? '삭제된 메시지' : message.content
 
-const roomPreviewText = (lastMessage: ChatRoomLastMessage | null) => {
-    if (!lastMessage) return ''
-    if (lastMessage.status === 'DELETED') return '삭제된 메시지'
-    return lastMessage.content
+const messagePreviewText = (message: ChatRoomLastMessage | null) => {
+    if (!message) return ''
+    if (message.status === 'DELETED') return '삭제된 메시지'
+    if (!message.attachment) return message.content
+    const label = message.attachment.contentType.startsWith('image/') ? '사진' : '동영상'
+    return message.attachment.hasCaption ? `${label} · ${message.content}` : label
+}
+
+function ChatMedia({ roomId, id, attachment }: ChatMessage) {
+    const [failed, setFailed] = useState(false)
+    if (!attachment) return null
+
+    const src = getChatAttachmentUrl(roomId, id)
+    const photo = attachment.contentType.startsWith('image/')
+
+    if (failed) {
+        return (
+            <div>
+                <p>{photo ? '사진을 불러오지 못했어요.' : '동영상을 재생하지 못했어요.'}</p>
+                <a href={src} download className="underline">원본 다운로드</a>
+            </div>
+        )
+    }
+
+    return photo ? (
+        <a href={src} target="_blank" rel="noopener noreferrer" className="block rounded-lg" aria-label="사진 원본 열기">
+            <img
+                src={src}
+                alt="채팅에 첨부된 사진"
+                width={288}
+                height={216}
+                loading="lazy"
+                decoding="async"
+                className="block aspect-[4/3] w-72 max-w-full rounded-lg object-contain"
+                onError={() => setFailed(true)}
+            />
+        </a>
+    ) : (
+        <video
+            src={src}
+            controls
+            playsInline
+            preload="none"
+            aria-label="채팅에 첨부된 동영상"
+            className="block aspect-video w-72 max-w-full rounded-lg"
+            onError={() => setFailed(true)}
+        />
+    )
 }
 
 const parseInviteUsernames = (input: string) => input
@@ -163,6 +217,7 @@ const parseInviteUsernames = (input: string) => input
 type ApiErrorBody = {
     status?: number
     message?: string
+    retryAfterSeconds?: number
 }
 
 const resolveChatRoomErrorMessage = (error: unknown) => {
@@ -198,6 +253,9 @@ const MessagePage: React.FC<MessagePageProps> = ({ standalone = false }) => {
         setMessagesState(messagesRef.current)
     }
     const [input, setInput] = useState('')
+    const [attachmentDrafts, setAttachmentDrafts] = useState<Partial<Record<string, AttachmentDraft>>>({})
+    const attachmentDraft = selectedRoom ? attachmentDrafts[selectedRoom.roomId] : undefined
+    const [isSendingAttachment, setIsSendingAttachment] = useState(false)
     const [chatError, setChatError] = useState<string | null>(null)
     const [rateLimitDeadline, setRateLimitDeadline] = useState(0)
     const [rateLimitRemainingSeconds, setRateLimitRemainingSeconds] = useState(0)
@@ -228,6 +286,8 @@ const MessagePage: React.FC<MessagePageProps> = ({ standalone = false }) => {
     const wsRef = useRef<WebSocket | null>(null)
     const selectedRoomRef = useRef<ChatRoomSummary | null>(null)
     const inputRef = useRef('')
+    const attachmentInputRef = useRef<HTMLInputElement | null>(null)
+    const attachmentSendInFlightRef = useRef(false)
     const myUserIdRef = useRef<string | undefined>(undefined)
     const directRoomCreationRef = useRef<string | null>(null)
     const directRoomSelectionGenerationRef = useRef(0)
@@ -509,8 +569,15 @@ const MessagePage: React.FC<MessagePageProps> = ({ standalone = false }) => {
 
     const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
         const nextInput = event.target.value
-        inputRef.current = nextInput
-        setInput(nextInput)
+        if (selectedRoom && attachmentDraft) {
+            setAttachmentDrafts((current) => ({
+                ...current,
+                [selectedRoom.roomId]: { ...attachmentDraft, caption: nextInput },
+            }))
+        } else {
+            inputRef.current = nextInput
+            setInput(nextInput)
+        }
 
         if (!selectedRoom || !nextInput.trim()) {
             stopTyping()
@@ -519,6 +586,29 @@ const MessagePage: React.FC<MessagePageProps> = ({ standalone = false }) => {
 
         startTypingIfNeeded()
         scheduleTypingStop()
+    }
+
+    const clearAttachmentDraft = (roomId: string) => {
+        setAttachmentDrafts((current) => {
+            const { [roomId]: _, ...otherDrafts } = current
+            return otherDrafts
+        })
+    }
+
+    const handleAttachmentSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.currentTarget.files?.[0]
+        event.currentTarget.value = ''
+        if (!file || !selectedRoom || attachmentSendInFlightRef.current) return
+
+        const error = validateChatMedia(file)
+        setChatError(error)
+        if (error) return
+        const caption = attachmentDraft?.caption ?? inputRef.current
+        if (!attachmentDraft) {
+            inputRef.current = ''
+            setInput('')
+        }
+        setAttachmentDrafts((current) => ({ ...current, [selectedRoom.roomId]: { file, caption } }))
     }
 
     const handleInputCompositionStart = () => {
@@ -555,7 +645,7 @@ const MessagePage: React.FC<MessagePageProps> = ({ standalone = false }) => {
 
     const roomPreviews = useMemo(() => {
         const rooms = roomsQuery.data ?? []
-        return Object.fromEntries(rooms.map((room) => [room.roomId, roomPreviewText(room.lastMessage)]))
+        return Object.fromEntries(rooms.map((room) => [room.roomId, messagePreviewText(room.lastMessage)]))
     }, [roomsQuery.data])
 
     const targetUserQuery = useQuery<UserProfileResponse>({
@@ -713,19 +803,24 @@ const MessagePage: React.FC<MessagePageProps> = ({ standalone = false }) => {
             reconnectAttempt += 1
             reconnectTimer = window.setTimeout(() => {
                 reconnectTimer = null
-                connect()
+                void connect()
             }, delay)
         }
 
-        const connect = () => {
+        const connect = async () => {
             if (closed) return
+            const roomsResult = await roomsRefetchRef.current()
+            if (closed) return
+            if (roomsResult.isError) {
+                scheduleReconnect()
+                return
+            }
             const nextSocket = createChatWebSocket()
             socket = nextSocket
             wsRef.current = nextSocket
 
             nextSocket.onopen = () => {
                 reconnectAttempt = 0
-                void roomsRefetchRef.current()
                 void refreshHistory()
             }
 
@@ -778,14 +873,14 @@ const MessagePage: React.FC<MessagePageProps> = ({ standalone = false }) => {
                             void roomsRefetchRef.current()
                             return
                         }
-                        applyMessageChange({ id: frame.messageId, status: frame.status, content: '' })
+                        applyMessageChange({ id: frame.messageId, status: frame.status, content: '', attachment: null })
                         void roomsRefetchRef.current()
                         return
                     }
 
                     const message = frame as ChatMessage
                     if (!message.roomId) return
-                    if (message.senderUserId === myUserIdRef.current) {
+                    if (message.senderUserId === myUserIdRef.current && !message.attachment) {
                         const pendingIndex = pendingSendDraftsRef.current.findIndex((draft) => (
                             draft.roomId === message.roomId && draft.content === message.content
                         ))
@@ -802,9 +897,8 @@ const MessagePage: React.FC<MessagePageProps> = ({ standalone = false }) => {
                     }
                     applyMessageChange(message)
                     if (message.senderUserId !== myUserIdRef.current) {
-                        const preview = message.content.length > 120
-                            ? `${message.content.slice(0, 120)}…`
-                            : message.content
+                        const text = messagePreviewText(message)
+                        const preview = text.length > 120 ? `${text.slice(0, 120)}…` : text
                         setMessageAnnouncement(`${message.senderUsername}님의 새 메시지: ${preview}`)
                     }
                     void roomsRefetchRef.current()
@@ -825,7 +919,7 @@ const MessagePage: React.FC<MessagePageProps> = ({ standalone = false }) => {
             nextSocket.onerror = () => nextSocket.close()
         }
 
-        connect()
+        void connect()
 
         return () => {
             closed = true
@@ -932,9 +1026,9 @@ const MessagePage: React.FC<MessagePageProps> = ({ standalone = false }) => {
         })
     }, [messages[messages.length - 1]?.id])
 
-    const handleSend = () => {
-        const text = input.trim()
-        if (!selectedRoom || !text) return
+    const handleSend = async () => {
+        const text = (attachmentDraft?.caption ?? input).trim()
+        if (!selectedRoom || (!text && !attachmentDraft) || attachmentSendInFlightRef.current) return
         if (!myProfileQuery.data?.userId) {
             setChatError('사용자 정보를 불러오는 중이에요. 잠시 후 다시 보내주세요.')
             return
@@ -952,7 +1046,7 @@ const MessagePage: React.FC<MessagePageProps> = ({ standalone = false }) => {
         }
 
         const ws = wsRef.current
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
+        if (!attachmentDraft && (!ws || ws.readyState !== WebSocket.OPEN)) {
             setChatError('실시간 연결을 복구 중이에요. 연결된 뒤 다시 보내주세요.')
             return
         }
@@ -965,6 +1059,51 @@ const MessagePage: React.FC<MessagePageProps> = ({ standalone = false }) => {
             applyRateLimit(MESSAGE_RATE_LIMIT_SECONDS)
             return
         }
+
+        if (attachmentDraft) {
+            if (text.length > MAX_ATTACHMENT_CAPTION_LENGTH) {
+                setChatError('첨부 설명은 4096자까지 입력할 수 있어요.')
+                return
+            }
+            const { roomId } = selectedRoom
+            attachmentSendInFlightRef.current = true
+            setIsSendingAttachment(true)
+            const sendingDraft = { ...attachmentDraft, error: undefined }
+            setAttachmentDrafts((current) => ({ ...current, [roomId]: sendingDraft }))
+            try {
+                const message = await sendChatAttachment(roomId, attachmentDraft.file, text)
+                localSendTimestampsRef.current = [...localSendTimestampsRef.current, Date.now()]
+                clearAttachmentDraft(roomId)
+                if (
+                    selectedRoomRef.current?.roomId === roomId &&
+                    !messageChangesRef.current.has(message.id) &&
+                    !messagesRef.current.some(({ id }) => id === message.id)
+                ) {
+                    applyMessageChange(message)
+                }
+                void roomsRefetchRef.current()
+            } catch (error) {
+                const response = (error as AxiosError<ApiErrorBody>)?.response
+                if (response?.status === 429) {
+                    applyRateLimit(response.data?.retryAfterSeconds || MESSAGE_RATE_LIMIT_SECONDS, response.data?.message)
+                } else {
+                    let message = '첨부 파일 전송에 실패했어요. 잠시 후 다시 시도해주세요.'
+                    if (response?.status === 413) message = '첨부 파일이 너무 커요. 사진은 15 MiB, 동영상은 50 MiB까지 보낼 수 있어요.'
+                    if (response?.status === 415) message = '지원하지 않는 사진 또는 동영상 형식이에요.'
+                    setAttachmentDrafts((current) => {
+                        return current[roomId] === sendingDraft
+                            ? { ...current, [roomId]: { ...sendingDraft, error: message } }
+                            : current
+                    })
+                }
+            } finally {
+                attachmentSendInFlightRef.current = false
+                setIsSendingAttachment(false)
+            }
+            return
+        }
+
+        if (!ws) return
 
         const pendingDraft: PendingSendDraft = {
             roomId: selectedRoom.roomId,
@@ -1061,6 +1200,7 @@ const MessagePage: React.FC<MessagePageProps> = ({ standalone = false }) => {
         setChatError(null)
         try {
             await leaveChatRoom(room.roomId)
+            clearAttachmentDraft(room.roomId)
             setLeaveRoomTarget(null)
             if (selectedRoom?.roomId === room.roomId) selectRoom(null)
             await roomsQuery.refetch()
@@ -1075,7 +1215,7 @@ const MessagePage: React.FC<MessagePageProps> = ({ standalone = false }) => {
     const handleEditMessage = async () => {
         const message = editingMessage
         const nextText = editText.trim()
-        if (!message || !nextText || messageActionLoading) return
+        if (!message || (!nextText && !message.attachment) || messageActionLoading) return
 
         setMessageActionLoading(true)
         setChatError(null)
@@ -1101,7 +1241,7 @@ const MessagePage: React.FC<MessagePageProps> = ({ standalone = false }) => {
         try {
             await deleteChatMessage(message.id)
             if (selectedRoomRef.current?.roomId === message.roomId) {
-                applyMessageChange({ id: message.id, status: 'DELETED', content: '' })
+                applyMessageChange({ id: message.id, status: 'DELETED', content: '', attachment: null })
             }
             setDeleteTarget(null)
             await roomsQuery.refetch()
@@ -1395,6 +1535,7 @@ const MessagePage: React.FC<MessagePageProps> = ({ standalone = false }) => {
                             message.senderUserId === myUserId ||
                             message.senderUsername === myUsername
                         const canModify = mine && message.status !== 'DELETED'
+                        const attachment = message.status === 'DELETED' ? null : message.attachment
                         const showSenderName = !mine && (
                             index === 0 || messages[index - 1].senderUserId !== message.senderUserId
                         )
@@ -1423,9 +1564,12 @@ const MessagePage: React.FC<MessagePageProps> = ({ standalone = false }) => {
                                             })
                                         }}
                                     >
-                                        <span className={message.status === 'DELETED' ? 'text-sub/70' : undefined}>
-                                            {messageDisplayText(message)}
-                                        </span>
+                                        {attachment && <ChatMedia {...message} />}
+                                        {(!attachment || attachment.hasCaption) && (
+                                            <span className={attachment ? 'mt-2 block' : message.status === 'DELETED' ? 'text-sub/70' : undefined}>
+                                                {messageDisplayText(message)}
+                                            </span>
+                                        )}
                                         {message.status === 'EDITED' && (
                                             <span className="ml-1.5 text-micro opacity-70">(수정됨)</span>
                                         )}
@@ -1466,9 +1610,9 @@ const MessagePage: React.FC<MessagePageProps> = ({ standalone = false }) => {
                 </div>
                 )}
 
-                {chatError && (
+                {(chatError || attachmentDraft?.error) && (
                     <div className="border-t border-line bg-panel-subtle px-6 py-2 text-xs text-danger" role="alert">
-                        {chatError}
+                        {chatError || attachmentDraft?.error}
                     </div>
                 )}
                 {rateLimitRemainingSeconds > 0 && (
@@ -1486,38 +1630,86 @@ const MessagePage: React.FC<MessagePageProps> = ({ standalone = false }) => {
                     {messageAnnouncement}
                 </div>
                 <div className="p-4 border-t border-line">
-                    <div className="relative">
-                        <label htmlFor="message-input" className="sr-only">메시지 입력</label>
+                    {selectedRoom && attachmentDraft && (
+                        <div className="mb-2 flex items-center gap-2 rounded-lg bg-surface pl-3 text-sm text-ink">
+                            <FiPaperclip aria-hidden="true" className="shrink-0 text-muted" />
+                            <span className="min-w-0 flex-1 truncate" title={attachmentDraft.file.name}>{attachmentDraft.file.name}</span>
+                            <button
+                                type="button"
+                                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-muted hover:text-ink focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-50"
+                                aria-label="첨부 파일 제거"
+                                disabled={isSendingAttachment}
+                                onClick={() => {
+                                    clearAttachmentDraft(selectedRoom.roomId)
+                                    if (!inputRef.current.trim()) {
+                                        inputRef.current = attachmentDraft.caption
+                                        setInput(attachmentDraft.caption)
+                                    } else if (attachmentDraft.caption.trim()) {
+                                        queueRejectedSendDraft({ roomId: selectedRoom.roomId, content: attachmentDraft.caption })
+                                    }
+                                }}
+                            >
+                                <FiX size={18} aria-hidden="true" />
+                            </button>
+                        </div>
+                    )}
+                    {isSendingAttachment && <p className="mb-2 text-xs text-sub" role="status">첨부 파일 전송 중…</p>}
+                    <div className="flex items-center gap-2">
                         <input
-                            id="message-input"
-                            name="message"
-                            autoComplete="off"
-                            className="h-12 w-full rounded-full bg-surface pl-5 pr-14 text-sm text-ink placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-brand/25"
-                            placeholder="메시지를 입력하세요…"
-                            value={input}
-                            onChange={handleInputChange}
-                            onCompositionStart={handleInputCompositionStart}
-                            onCompositionUpdate={handleInputCompositionUpdate}
-                            onBlur={stopTyping}
-                            aria-describedby={rateLimitRemainingSeconds > 0 ? 'message-rate-limit-status' : undefined}
-                            onKeyDown={(e) => {
-                                if (e.nativeEvent.isComposing) return
-                                if (e.key === 'Enter') {
-                                    e.preventDefault()
-                                    void handleSend()
-                                }
-                            }}
+                            id="message-attachment"
+                            type="file"
+                            accept={chatMediaAccept}
+                            hidden
+                            ref={attachmentInputRef}
+                            onChange={handleAttachmentSelect}
+                            disabled={!selectedRoom || isSendingAttachment}
                         />
                         <button
-                            className="absolute right-0.5 top-0.5 h-11 w-11 rounded-full bg-brand text-on-brand flex items-center justify-center hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50"
-                            onClick={() => void handleSend()}
-                            disabled={!selectedRoom || !input.trim() || rateLimitRemainingSeconds > 0}
-                            aria-label={rateLimitRemainingSeconds > 0
-                                ? `메시지 보내기 (${rateLimitRemainingSeconds}초 후 가능)`
-                                : '메시지 보내기'}
+                            type="button"
+                            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-surface text-sub hover:text-ink focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-50"
+                            aria-label="사진 또는 동영상 첨부"
+                            title="사진 또는 동영상 첨부"
+                            disabled={!selectedRoom || isSendingAttachment}
+                            onClick={() => attachmentInputRef.current?.click()}
                         >
-                            <SendIcon size={18} />
+                            <FiPaperclip size={20} aria-hidden="true" />
                         </button>
+                        <div className="relative min-w-0 flex-1">
+                            <label htmlFor="message-input" className="sr-only">메시지 입력</label>
+                            <input
+                                id="message-input"
+                                name="message"
+                                autoComplete="off"
+                                className="h-12 w-full rounded-full bg-surface pl-5 pr-14 text-sm text-ink placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-brand/25"
+                                placeholder={attachmentDraft ? '설명을 입력하세요 (선택)' : '메시지를 입력하세요…'}
+                                value={attachmentDraft?.caption ?? input}
+                                readOnly={!!attachmentDraft && isSendingAttachment}
+                                maxLength={attachmentDraft ? MAX_ATTACHMENT_CAPTION_LENGTH : undefined}
+                                onChange={handleInputChange}
+                                onCompositionStart={handleInputCompositionStart}
+                                onCompositionUpdate={handleInputCompositionUpdate}
+                                onBlur={stopTyping}
+                                aria-describedby={rateLimitRemainingSeconds > 0 ? 'message-rate-limit-status' : undefined}
+                                onKeyDown={(e) => {
+                                    if (e.nativeEvent.isComposing) return
+                                    if (e.key === 'Enter') {
+                                        e.preventDefault()
+                                        void handleSend()
+                                    }
+                                }}
+                            />
+                            <button
+                                type="button"
+                                className="absolute right-0.5 top-0.5 h-11 w-11 rounded-full bg-brand text-on-brand flex items-center justify-center hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-50"
+                                onClick={() => void handleSend()}
+                                disabled={!selectedRoom || (!input.trim() && !attachmentDraft) || isSendingAttachment || rateLimitRemainingSeconds > 0}
+                                aria-label={rateLimitRemainingSeconds > 0
+                                    ? `메시지 보내기 (${rateLimitRemainingSeconds}초 후 가능)`
+                                    : '메시지 보내기'}
+                            >
+                                <SendIcon size={18} />
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1711,7 +1903,7 @@ const MessagePage: React.FC<MessagePageProps> = ({ standalone = false }) => {
                         onClick={() => {
                             contextMenu.trigger?.focus({ preventScroll: true })
                             setEditingMessage(contextMenu.message)
-                            setEditText(contextMenu.message.content)
+                            setEditText(contextMenu.message.attachment?.hasCaption === false ? '' : contextMenu.message.content)
                             setContextMenu(null)
                         }}
                     >
@@ -1768,6 +1960,7 @@ const MessagePage: React.FC<MessagePageProps> = ({ standalone = false }) => {
                             data-dialog-initial-focus
                             className="mt-4 min-h-28 w-full resize-y rounded-lg border border-line bg-panel p-3 text-sm text-ink outline-none focus:border-brand"
                             value={editText}
+                            maxLength={editingMessage.attachment ? MAX_ATTACHMENT_CAPTION_LENGTH : undefined}
                             onChange={(event) => setEditText(event.target.value)}
                             onKeyDown={(event) => {
                                 if (event.key === 'Escape') setEditingMessage(null)
@@ -1786,7 +1979,7 @@ const MessagePage: React.FC<MessagePageProps> = ({ standalone = false }) => {
                                 type="button"
                                 className="h-9 rounded-md bg-brand px-3 text-sm font-medium text-on-brand disabled:opacity-50"
                                 onClick={() => void handleEditMessage()}
-                                disabled={messageActionLoading || !editText.trim()}
+                                disabled={messageActionLoading || (!editText.trim() && !editingMessage.attachment)}
                             >
                                 수정
                             </button>

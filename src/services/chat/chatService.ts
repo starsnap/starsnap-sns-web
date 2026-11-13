@@ -2,6 +2,12 @@ import AuthAxios from '../../lib/axios/AuthAxios'
 
 export type ChatMessageStatus = 'NORMAL' | 'EDITED' | 'DELETED'
 
+export type ChatAttachment = {
+    contentType: string
+    size: number
+    hasCaption: boolean
+}
+
 export type ChatMessage = {
     id: string
     roomId: string
@@ -10,6 +16,7 @@ export type ChatMessage = {
     content: string
     status: ChatMessageStatus
     createdAt: string
+    attachment?: ChatAttachment | null
 }
 
 export type ChatMessageHistoryPage = {
@@ -37,6 +44,7 @@ export type ChatRoomLastMessage = {
     content: string
     status: ChatMessageStatus
     createdAt: string
+    attachment?: ChatAttachment | null
 }
 
 export type ChatRoomSummary = {
@@ -124,6 +132,21 @@ export async function leaveChatRoom(roomId: string): Promise<void> {
 export async function sendChatMessage(payload: ChatSendPayload): Promise<ChatMessage> {
     const resp = await AuthAxios.post<ChatMessage>('message/send', payload)
     return resp.data
+}
+
+export async function sendChatAttachment(roomId: string, file: File, content: string): Promise<ChatMessage> {
+    const payload = new FormData()
+    payload.append('file', file)
+    if (content) payload.append('content', content)
+    const resp = await AuthAxios.post<ChatMessage>(`message/rooms/${encodeURIComponent(roomId)}/media`, payload, {
+        headers: { 'X-Chat-Media': '1' },
+        timeout: 300_000,
+    })
+    return resp.data
+}
+
+export function getChatAttachmentUrl(roomId: string, messageId: string): string {
+    return `/api/message/rooms/${encodeURIComponent(roomId)}/media/${encodeURIComponent(messageId)}`
 }
 
 export async function updateChatMessage(
