@@ -6,7 +6,7 @@ import { queryClient } from '../../lib/query/queryClient';
 import token from '../../lib/token/token';
 
 type LoginPageProps = {
-    surface?: 'social' | 'chat' | 'bible';
+    surface?: 'social' | 'chat';
 };
 
 type LoginLocationState = {
@@ -25,12 +25,9 @@ const LoginPage: React.FC<LoginPageProps> = ({ surface = 'social' }) => {
     const location = useLocation();
     const navigate = useNavigate();
     const isChatSurface = surface === 'chat';
-    const isBibleSurface = surface === 'bible';
     const loginSubtitle = isChatSurface
         ? 'SNS에서 이어진 대화를 메시지 전용 화면에서 만나보세요'
-        : isBibleSurface
-            ? '성경 말씀을 찾고, 한 절 또는 여러 절로 QT를 기록해보세요'
-            : '좋아하는 스타의 순간을 한곳에 모아보세요';
+        : '좋아하는 스타의 순간을 한곳에 모아보세요';
 
     const [loading, setLoading] = useState(false);
     const [errorMessage, setErrorMessage] = useState('');
@@ -53,12 +50,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ surface = 'social' }) => {
         setLoading(true);
         try {
             const loginType = identifier.includes('@') ? 'EMAIL' : 'USERNAME';
-            const resp = await CustomAxios.post(
-                isBibleSurface ? 'bible/auth/login' : 'auth/login',
-                isBibleSurface
-                    ? { username: identifier, password }
-                    : { username: identifier, password, loginType },
-            );
+            const resp = await CustomAxios.post('auth/login', { username: identifier, password, loginType });
 
             if (resp.status === 200 && resp.data) {
                 queryClient.clear();
@@ -109,7 +101,7 @@ const LoginPage: React.FC<LoginPageProps> = ({ surface = 'social' }) => {
                             height={96}
                             className="h-10 w-10 shrink-0 rounded-xl object-cover"
                         />
-                        {isChatSurface ? 'StarSnap Chat' : isBibleSurface ? 'StarSnap Bible' : 'StarSnap'}
+                        {isChatSurface ? 'StarSnap Chat' : 'StarSnap'}
                     </h1>
                     <p className="mt-2 text-sm text-sub">
                         {loginSubtitle}
@@ -119,14 +111,14 @@ const LoginPage: React.FC<LoginPageProps> = ({ surface = 'social' }) => {
                 <form className="mt-7 flex flex-col gap-4" onSubmit={handleSubmit}>
                     <div>
                         <label htmlFor="login-identifier" className="block text-sm font-bold text-ink mb-1.5">
-                            {isBibleSurface ? '아이디' : '아이디 또는 이메일'}
+                            아이디 또는 이메일
                         </label>
                         <input
                             id="login-identifier"
                             className={inputClass}
                             name="identifier"
                             type="text"
-                            placeholder={isBibleSurface ? '아이디를 입력하세요…' : '예: 아이디 또는 이메일…'}
+                            placeholder="예: 아이디 또는 이메일…"
                             value={identifier}
                             onChange={(e) => setIdentifier(e.target.value)}
                             autoComplete="username"
@@ -148,26 +140,24 @@ const LoginPage: React.FC<LoginPageProps> = ({ surface = 'social' }) => {
                             onChange={(e) => setPassword(e.target.value)}
                             autoComplete="current-password"
                         />
-                        {!isBibleSurface && (
-                            <div className="mt-1 flex justify-end">
-                                {isChatSurface ? (
-                                    <a
-                                        href={getSocialAppUrl('/forgot-password')}
-                                        className="inline-flex min-h-11 items-center rounded-lg px-1.5 text-sm font-semibold text-sub underline decoration-brand decoration-2 underline-offset-4"
-                                    >
-                                        SNS에서 비밀번호 찾기
-                                    </a>
-                                ) : (
-                                    <button
-                                        type="button"
-                                        onClick={() => navigate('/forgot-password')}
-                                        className="min-h-11 rounded-lg px-1.5 text-sm font-semibold text-sub underline decoration-brand decoration-2 underline-offset-4"
-                                    >
-                                        비밀번호를 잊으셨나요?
-                                    </button>
-                                )}
-                            </div>
-                        )}
+                        <div className="mt-1 flex justify-end">
+                            {isChatSurface ? (
+                                <a
+                                    href={getSocialAppUrl('/forgot-password')}
+                                    className="inline-flex min-h-11 items-center rounded-lg px-1.5 text-sm font-semibold text-sub underline decoration-brand decoration-2 underline-offset-4"
+                                >
+                                    SNS에서 비밀번호 찾기
+                                </a>
+                            ) : (
+                                <button
+                                    type="button"
+                                    onClick={() => navigate('/forgot-password')}
+                                    className="min-h-11 rounded-lg px-1.5 text-sm font-semibold text-sub underline decoration-brand decoration-2 underline-offset-4"
+                                >
+                                    비밀번호를 잊으셨나요?
+                                </button>
+                            )}
+                        </div>
                     </div>
 
                     {errorMessage && <p className="text-sm text-danger" role="alert">{errorMessage}</p>}

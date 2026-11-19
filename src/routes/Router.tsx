@@ -18,9 +18,6 @@ import MessagePage from '../pages/main/MessagePage';
 import SavedPage from '../pages/main/SavedPage';
 import SettingPage from '../pages/main/SettingPage';
 import ChatLayout from '../pages/chat/ChatLayout';
-import BibleLayout from '../pages/bible/BibleLayout';
-import BiblePage from '../pages/bible/BiblePage';
-import BibleSignupPage from '../pages/bible/BibleSignupPage';
 import { getAppSurface } from '../lib/appSurface';
 import token from '../lib/token/token';
 
@@ -84,20 +81,6 @@ const ChatRoutes = () => {
     )
 }
 
-const BibleRoutes = () => {
-    return (
-        <Routes>
-            <Route path="/" element={<RequireAuth><BibleLayout/></RequireAuth>}>
-                <Route index element={<BiblePage/>} />
-            </Route>
-            <Route path="/login" element={<LoginPage surface="bible"/>} />
-            <Route path="/signup" element={<BibleSignupPage/>} />
-            <Route path="/oauth/signup" element={<Navigate to="/signup" replace/>} />
-            <Route path="*" element={<Navigate to="/" replace/>} />
-        </Routes>
-    )
-}
-
 const Router = () => {
     const surface = getAppSurface()
 
@@ -105,8 +88,6 @@ const Router = () => {
         <BrowserRouter>
             {surface === 'chat' ? (
                 <ChatRoutes/>
-            ) : surface === 'bible' ? (
-                <BibleRoutes/>
             ) : (
                 <SocialRoutes/>
             )}

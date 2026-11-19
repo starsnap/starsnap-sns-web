@@ -1,7 +1,6 @@
-export type AppSurface = 'social' | 'chat' | 'bible'
+export type AppSurface = 'social' | 'chat'
 
 const CHAT_HOSTNAME = 'chat.starsnap.kr'
-const BIBLE_HOSTNAME = 'bible.starsnap.kr'
 const DEFAULT_SOCIAL_APP_URL = 'https://sns.starsnap.kr'
 
 export function resolveAppSurface(
@@ -10,12 +9,10 @@ export function resolveAppSurface(
 ): AppSurface {
     const normalizedSurface = configuredSurface.trim().toLowerCase()
     if (normalizedSurface === 'chat') return 'chat'
-    if (normalizedSurface === 'bible') return 'bible'
     if (normalizedSurface === 'social') return 'social'
 
     const normalizedHostname = hostname.trim().toLowerCase()
     if (normalizedHostname === CHAT_HOSTNAME) return 'chat'
-    if (normalizedHostname === BIBLE_HOSTNAME) return 'bible'
 
     return 'social'
 }
